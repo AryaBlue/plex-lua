@@ -1,0 +1,32 @@
+[video] Windows decoders: h264, vp9, av1, mpeg4, mpeg2video, vc1
+[play    0.9s] server via remote · secure
+[play    0.9s] server via remote · secure
+[play    1.0s] playing Baby Driver
+[play    1.0s] state -> preparing
+[play    1.0s] playing Baby Driver
+[play    1.0s] state -> opening
+[play    2.8s] state -> playing
+[play    4.0s] t=1.2  state=playing  starved=false  recoveries=0  fps=63
+[play    9.0s] t=6.2  state=playing  starved=false  recoveries=0  fps=60
+[play   14.0s] t=11.3  state=playing  starved=false  recoveries=0  fps=60
+[play   16.2s] state -> preparing
+[play   16.3s] state -> opening
+[play   23.0s] state -> playing
+[play   23.0s] t=416.0  state=playing  starved=false  recoveries=0  fps=4
+[player] stream error: lib/NativeVideo.lua:169: NativeVideo: ReadSample failed (0xc00d2ee0)
+[info] Reconnecting: ReadSample failed (0xc00d2ee0)
+[play   24.2s] state -> preparing
+[play   24.3s] state -> opening
+[play   25.8s] state -> playing
+[play   28.0s] t=419.2  state=playing  starved=false  recoveries=1  fps=60
+[play   33.0s] t=424.2  state=playing  starved=false  recoveries=1  fps=60
+[play   38.0s] t=429.2  state=playing  starved=false  recoveries=1  fps=60
+[play   43.0s] t=434.3  state=playing  starved=false  recoveries=1  fps=60
+[play   48.0s] t=439.3  state=playing  starved=false  recoveries=1  fps=60
+[play   53.0s] t=444.2  state=playing  starved=false  recoveries=1  fps=60
+[play   58.1s] t=449.3  state=playing  starved=false  recoveries=1  fps=60
+[play   63.1s] t=454.3  state=playing  starved=false  recoveries=1  fps=60
+[play   68.1s] t=459.3  state=playing  starved=false  recoveries=1  fps=60
+[play   73.1s] t=464.3  state=playing  starved=false  recoveries=1  fps=60
+[play   78.1s] t=469.3  state=playing  starved=false  recoveries=1  fps=59
+[play   83.1s] t=474.4  state=playing  starved=false  recoveries=1  fps=60

@@ -1,0 +1,21 @@
+This game indicates it was made for version '11.5' of LOVE.
+It may not be compatible with the running version (12.0).
+LOVE - Warning: [love "boot.lua"]:392: Using deprecated field window.highdpi (replaced by t.highdpi in love.conf)
+[nvtest   0.57s] signed in as Lauren Cook
+[nvtest   0.89s] server TLSS 2: Electric Boogaloo online via remote · secure [https://82-36-176-191.d85a47a38cf94183bb35a5c33be643e5.plex.direct:12319]
+[nvtest   0.89s]    testing relay=false private=true  https://192-168-0-6.d85a47a38cf94183bb35a5c33be643e5.plex.direct:32400 
+[nvtest   0.89s]    testing relay=false private=false https://plex.proddy.xyz:12319 
+[nvtest   0.89s]    testing relay=false private=true  https://172-17-0-1.d85a47a38cf94183bb35a5c33be643e5.plex.direct:32400 
+[nvtest   0.89s]    ok      relay=false private=false https://82-36-176-191.d85a47a38cf94183bb35a5c33be643e5.plex.direct:12319 116ms
+[nvtest   0.92s] item: 2 Lava 2 Lantula! (movie) ratingKey=163426 container=mp4 video=h264 audio=aac 1920x1072
+[nvtest   0.92s] backend: mediafoundation
+[nvtest   0.92s] nv_open(https://plex.proddy.xyz:12319/library/parts/208001/1789739310/file.mp4?X-Plex-Token=<redacted>)
+[nvtest   2.83s] opened in 1.91s: 1920x1072 23.976 fps, duration 5090.5s
+[nvtest   3.27s] decoded 120 frames in 0.43s (276.4 fps decode, worst frame 32 ms), pts 0.000 -> 4.963
+[nvtest   3.27s] mid-row brightness sample: 17035
+[nvtest   3.87s] seek(60) -> ok, first frame pts 57.891, took 0.60s
+[nvtest   5.90s] audio opened in 1.95s: 48000 Hz, 2 ch (source 2 ch)
+[nvtest   6.02s] decoded 5.03s of audio in 0.13s, first pts 0.000, peak level 1/32767
+[nvtest   6.29s] audio seek(60) -> 1024 frames at pts 60.0000
+[nvtest   6.29s] RESULT: direct play URL works with nv_open
+[nvtest   6.29s] done

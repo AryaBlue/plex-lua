@@ -1,0 +1,30 @@
+This game indicates it was made for version '11.5' of LOVE.
+It may not be compatible with the running version (12.0).
+LOVE - Warning: [love "boot.lua"]:392: Using deprecated field window.highdpi (replaced by t.highdpi in love.conf)
+[nvtest   0.60s] signed in as Lauren Cook
+[nvtest   1.01s] server TLSS 2: Electric Boogaloo online via remote · secure [https://82-36-176-191.d85a47a38cf94183bb35a5c33be643e5.plex.direct:12319]
+[nvtest   1.01s]    testing relay=false private=true  https://192-168-0-6.d85a47a38cf94183bb35a5c33be643e5.plex.direct:32400 
+[nvtest   1.01s]    testing relay=false private=false https://plex.proddy.xyz:12319 
+[nvtest   1.01s]    testing relay=false private=true  https://172-17-0-1.d85a47a38cf94183bb35a5c33be643e5.plex.direct:32400 
+[nvtest   1.01s]    ok      relay=false private=false https://82-36-176-191.d85a47a38cf94183bb35a5c33be643e5.plex.direct:12319 116ms
+[nvtest   1.06s] item: The 5th Wave (movie) ratingKey=63603 container=mkv video=h264 audio=ac3 1920x1080
+[nvtest   1.07s] backend: mediafoundation
+[nvtest   1.07s] nv_open(https://plex.proddy.xyz:12319/library/parts/78447/1687042080/file.mkv?X-Plex-Token=<redacted>)
+[nvtest   1.25s] FAIL nv_open after 0.18s: could not open video (0xc00d2ee2). Unsupported codec? HEVC/AV1 need the Microsoft Store extensions.
+[nvtest   1.25s] RESULT: nv_open could NOT play the URL
+[nvtest   1.25s] plan: Direct play
+Error: tools/nvtest.lua:39: attempt to redefine 'nv_info' at line 2
+stack traceback:
+	[love "boot.lua"]:465: in function <[love "boot.lua"]:461>
+	[C]: in function 'cdef'
+	tools/nvtest.lua:39: in function 'load_nv'
+	tools/nvtest.lua:44: in function 'run_nv'
+	tools/nvtest.lua:194: in function 'plan'
+	tools/nvtest.lua:191: in function 'callback'
+	plex/api.lua:62: in function 'callback'
+	plex/api.lua:23: in function 'callback'
+	lib/http.lua:53: in function 'callback'
+	lib/http.lua:68: in function 'update'
+	main.lua:65: in function 'update'
+	[love "callbacks.lua"]:190: in function <[love "callbacks.lua"]:172>
+	[C]: in function 'xpcall'

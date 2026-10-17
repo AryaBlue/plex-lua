@@ -1,0 +1,16 @@
+This game indicates it was made for version '11.5' of LOVE.
+It may not be compatible with the running version (12.0).
+LOVE - Warning: [love "boot.lua"]:392: Using deprecated field window.highdpi (replaced by t.highdpi in love.conf)
+[nvtest   0.64s] signed in as Lauren Cook
+[nvtest   0.96s] server TLSS 2: Electric Boogaloo online via remote · secure [https://plex.proddy.xyz:12319]
+[nvtest   0.96s]    testing relay=false private=true  https://192-168-0-6.d85a47a38cf94183bb35a5c33be643e5.plex.direct:32400 
+[nvtest   0.96s]    ok      relay=false private=false https://plex.proddy.xyz:12319 116ms
+[nvtest   0.96s]    testing relay=false private=true  https://172-17-0-1.d85a47a38cf94183bb35a5c33be643e5.plex.direct:32400 
+[nvtest   0.96s]    testing relay=false private=false https://82-36-176-191.d85a47a38cf94183bb35a5c33be643e5.plex.direct:12319 
+[nvtest   1.49s] item: Baby Driver (movie) ratingKey=414 container=mkv video=hevc audio=aac 1920x804
+[nvtest   1.50s] backend: mediafoundation
+[nvtest   1.50s] nv_open(https://plex.proddy.xyz:12319/library/parts/846/1554417298/file.mkv?X-Plex-Token=<redacted>)
+[nvtest   3.58s] FAIL nv_open after 2.09s: could not open video (0xc00d5212). Unsupported codec? HEVC/AV1 need the Microsoft Store extensions.
+[nvtest   3.58s] RESULT: nv_open could NOT play the URL
+[nvtest   3.65s] transcode plan failed: You have too many active streams.
+[nvtest   3.65s] done
