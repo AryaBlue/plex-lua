@@ -185,6 +185,40 @@ function W.castIcon(cx, cy, size, u)
     love.graphics.arc("line", "open", ox, oy, sh * 0.58, -math.pi / 2, 0)
 end
 
+-- A five-pointed star of outer radius r centred on cx, cy, in the current colour.
+-- fill: 1 solid, 0 outline only, 0.5 the left half solid (half stars).
+local STAR = {}            -- unit star outline (radius 1 at the origin)
+for i = 0, 9 do
+    local a = -math.pi / 2 + i * math.pi / 5
+    local rr = i % 2 == 0 and 1 or 0.45
+    STAR[#STAR + 1] = math.cos(a) * rr
+    STAR[#STAR + 1] = math.sin(a) * rr
+end
+local STAR_TRIS            -- it's concave: filled as triangles
+function W.star(cx, cy, r, fill)
+    local u = gfx.unit()
+    local pts = {}
+    for i = 1, #STAR, 2 do
+        pts[i], pts[i + 1] = cx + STAR[i] * r, cy + STAR[i + 1] * r
+    end
+    if fill > 0 then
+        STAR_TRIS = STAR_TRIS or love.math.triangulate(STAR)
+        local sx, sy, sw, sh = love.graphics.getScissor()
+        if fill < 1 then love.graphics.intersectScissor(cx - r, cy - r, r * 2 * fill, r * 2) end
+        love.graphics.push()
+        love.graphics.translate(cx, cy)
+        love.graphics.scale(r)
+        for _, t in ipairs(STAR_TRIS) do love.graphics.polygon("fill", t) end
+        love.graphics.pop()
+        love.graphics.setScissor(sx, sy, sw, sh)
+    end
+    if fill < 1 then
+        love.graphics.setLineWidth(math.max(1.5, 2 * u))
+        love.graphics.setLineJoin("miter")
+        love.graphics.polygon("line", pts)
+    end
+end
+
 -- Pill button. kind = "primary" (filled white), "secondary" (translucent).
 -- Width W.button would draw `label` at height h (icon: an opts.icon name or nil).
 function W.buttonWidth(label, h, icon)
@@ -239,6 +273,9 @@ function W.button(label, x, y, h, focus, opts)
     elseif opts.icon == "cast" then
         gfx.color(tc)
         W.castIcon(tx - iconW * 0.6, dy + dh / 2, h * 0.36, u)
+    elseif opts.icon == "star" then
+        gfx.color(opts.starColor or tc)
+        W.star(tx - iconW * 0.55, dy + dh / 2, h * 0.2, opts.starFill or 0)
     elseif opts.icon == "restart" then
         gfx.color(tc)
         love.graphics.setLineWidth(2.5 * u)

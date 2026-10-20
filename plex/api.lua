@@ -245,6 +245,27 @@ end
 
 -- PUT /actions/removeFromContinueWatching (the library provider's action, as
 -- Plex Web sends it): hides an item from Continue Watching.
+-- Your star rating (Plex's userRating): 0..10, two per star. nil clears it
+-- (rating=-1, what Plex Web sends; the spec only lists 0..10).
+function api.rate(server, item, rating, callback)
+    return http.request({
+        method = "PUT", headers = client.headers(server.accessToken), timeout = 15,
+        url = url(server, "/:/rate", { identifier = "com.plexapp.plugins.library", key = item.ratingKey,
+                                       rating = rating or -1 }),
+    }, function(res, err)
+        if callback then callback(res and res.status >= 200 and res.status < 300, err) end
+    end)
+end
+
+-- A userRating as stars: "4½ stars", "1 star", "Not rated".
+function api.starsText(rating)
+    local halves = math.floor((tonumber(rating) or 0) + 0.5)
+    if halves <= 0 then return "Not rated" end
+    local whole = math.floor(halves / 2)
+    return (whole > 0 and tostring(whole) or "") .. (halves % 2 == 1 and "½" or "")
+        .. (halves == 2 and " star" or " stars")
+end
+
 function api.removeFromContinueWatching(server, item, callback)
     return http.request({
         method = "PUT", headers = client.headers(server.accessToken), timeout = 15,

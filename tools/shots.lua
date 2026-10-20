@@ -652,6 +652,67 @@ local watchlistScript = {
     { quit = true },
 }
 
+-- lovec . --shots rate : the Rate button and star picker on a film's page, and
+-- Rate in a card's menu. PUTs are caught (nothing is rated on the server); the
+-- requests that would have been sent are printed.
+local ratePuts = {}
+local function rateReport(tag)
+    return { call = function()
+        local top = app.top()
+        local labels = {}
+        for _, b in ipairs(top.buttons or {}) do labels[#labels + 1] = b.label end
+        for _, e in ipairs(top.entries or {}) do labels[#labels + 1] = e.label end
+        print(("[shots] %s: value=%s  labels=%s  puts=%s"):format(tag, tostring(top.value),
+            table.concat(labels, " | "), table.concat(ratePuts, " ; ")))
+    end }
+end
+local function rateButton()
+    return { call = function()
+        for _, b in ipairs(app.top().buttons or {}) do if b.icon == "star" then b.run() end end
+    end }
+end
+local rateScript = {
+    { call = function()
+        local http = require("lib.http")
+        local real = http.request
+        http.request = function(o, cb)
+            if o.method == "PUT" then
+                ratePuts[#ratePuts + 1] = o.url:gsub("^https?://[^/]+", ""):gsub("[?&]X%-Plex%-Token=[^&]*", "")
+                return cb({ status = 200, body = "" })
+            end
+            return real(o, cb)
+        end
+    end },
+    { wait = "home" }, { wait = 2 },
+    { call = function()
+        local h = app.top()
+        for _, r in ipairs(h.rows) do
+            for _, it in ipairs(r.items or {}) do
+                if it.type == "movie" and not h.rateMovie then h.rateMovie = it end
+            end
+        end
+        print("[shots] rating: " .. tostring(h.rateMovie and h.rateMovie.title))
+        app.push(require("ui.detail").new(h.server, h.rateMovie))
+    end }, { wait = 4 }, rateReport("page"), { shot = "200-rate-button" },
+    rateButton(), { wait = 0.6 }, rateReport("picker"), { shot = "201-rate-picker" },
+    { action = "right" }, { action = "right" }, { action = "right" }, { action = "right" },
+    { action = "right" }, { action = "right" }, { action = "right" }, { wait = 0.3 }, rateReport("3.5 stars"),
+    { shot = "202-rate-picker-chosen" },
+    { action = "accept" }, { wait = 1.5 }, rateReport("saved"), { shot = "203-rate-button-rated" },
+    rateButton(), { wait = 0.6 }, { action = "down" }, { wait = 0.3 }, { shot = "204-rate-picker-rated" },
+    { action = "accept" }, { wait = 1 }, rateReport("removed"),
+    rateButton(), { wait = 0.6 }, { key = "4" }, { wait = 1 }, rateReport("key 4"),
+    { action = "back" }, { wait = 1 },
+    { call = function() local h = app.top(); h.focusRow = 2; h.rows[1].col = 1 end }, { wait = 0.8 },
+    { action = "menu" }, { wait = 0.5 }, rateReport("card menu"), { shot = "205-card-menu-rate" },
+    { call = function()
+        local m = app.top()
+        for i, e in ipairs(m.entries) do if e.label:find("Rat") then m.sel = i end end
+        m:action("accept")
+    end }, { wait = 0.6 }, { shot = "206-card-menu-picker" }, { action = "back" },
+    { quit = true },
+}
+
 -- lovec . --shots stall : plays a clip from a local server that stops sending
 -- for 1.5 s every couple of seconds (start `python tools/slowserve.py` first),
 -- and reports the longest gap between app frames: the stream's thread waits on
@@ -721,28 +782,6 @@ local castScript = {
     openDetail({ type = "movie", ratingKey = "149061" }), { wait = 5 },
     { action = "down" }, { action = "down" }, { wait = 2 },
     castReport("film cast"), { shot = "184-film-cast" },
-    { quit = true },
-}
-
--- lovec . --shots casting : a film's page with the Cast button focused. Read-only
--- (doesn't open the device picker, so nothing is asked on the network).
-local function focusButton(label)
-    return { call = function()
-        local top = app.top()
-        for i, b in ipairs(top.buttons or {}) do
-            if b.label:find(label, 1, true) then top.button = i end
-        end
-        print(("[shots] buttons: %s"):format(table.concat((function()
-            local t = {}
-            for _, b in ipairs(top.buttons or {}) do t[#t + 1] = b.label end
-            return t
-        end)(), " | ")))
-    end }
-end
-local castingScript = {
-    { wait = "home" },
-    openDetail({ type = "movie", ratingKey = "149061" }), { wait = 5 },
-    focusButton("Cast"), { wait = 1 }, { shot = "190-cast-button" },
     { quit = true },
 }
 
@@ -1006,6 +1045,7 @@ function T.start(args)
         if a == "--shots" and args[i + 1] == "player" then script = playerScript; T.player = true end
         if a == "--shots" and args[i + 1] == "mouse" then script = mouseScript end
         if a == "--shots" and args[i + 1] == "rows" then script = rowsScript end
+        if a == "--shots" and args[i + 1] == "rate" then script = rateScript end
         if a == "--shots" and args[i + 1] == "profile" then script = profileScript end
         if a == "--shots" and args[i + 1] == "nextep" then script = nextepScript end
         if a == "--shots" and args[i + 1] == "notify" then script = notifyScript end
@@ -1014,7 +1054,6 @@ function T.start(args)
         if a == "--shots" and args[i + 1] == "watchlist" then script = watchlistScript end
         if a == "--shots" and args[i + 1] == "foryou" then script = forYouScript end
         if a == "--shots" and args[i + 1] == "cast" then script = castScript end
-        if a == "--shots" and args[i + 1] == "casting" then script = castingScript end
         if a == "--shots" and args[i + 1] == "audio" then script = audioScript; T.player = true; T.audioTest = true end
         if a == "--shots" and args[i + 1] == "tracks" then script = tracksScript; T.player = true; T.tracksTest = true end
         if a == "--shots" and args[i + 1] == "opus51" then script = opusScript; T.player = true; T.opusTest = true end

@@ -1,6 +1,6 @@
 -- Options for one poster (Plex's "⋯" menu on a card): play, mark watched or
--- unwatched, add to / remove from the watchlist, remove from Continue
--- Watching, go to the show. Watchlist titles that aren't on the server get
+-- unwatched, add to / remove from the watchlist, rate (ui/rate.lua), remove
+-- from Continue Watching, go to the show. Watchlist titles that aren't on the server get
 -- Request (Seerr) and Remove from Watchlist. Opens beside the
 -- card it belongs to, styled like the account menu (ui/profile.lua).
 -- Opened with right click, the card's ⋯ button, or Tab / Y on a focused card.
@@ -15,7 +15,7 @@ local ItemMenu = {}
 ItemMenu.__index = ItemMenu
 
 -- opts: anchor = { x, y, w, h } (the card), continueWatching = the card is in
--- that row, onChange(what) after a change ("watched" | "continue" | "watchlist").
+-- that row, onChange(what) after a change ("watched" | "continue" | "watchlist" | "rating").
 function ItemMenu.open(server, item, opts)
     if not item or item.type == "genre" or item.seerr or not item.ratingKey then return end
     local menu = ItemMenu.new(server, item, opts)
@@ -59,6 +59,8 @@ function ItemMenu.new(server, item, opts)
             add(show and "Add Show to Watchlist" or "Add to Watchlist", function() self:setWatchlist(true) end)
         end
     end
+    local rating = math.floor((tonumber(item.userRating) or 0) + 0.5)
+    add(rating > 0 and ("Change Rating (" .. api.starsText(rating) .. ")") or "Rate", function() self:rate() end)
     if opts.continueWatching then add("Remove from Continue Watching", function() self:removeContinue() end) end
     local show = item.type == "episode" and item.grandparentRatingKey or item.type == "season" and item.parentRatingKey
     if show then
@@ -108,6 +110,15 @@ function ItemMenu:setWatched(watched)
         app.notify((watched and "Marked as watched: " or "Marked as unwatched: ") .. api.displayTitle(item))
         if onChange then onChange("watched") end
     end)
+end
+
+function ItemMenu:rate()
+    app.pop()
+    local onChange = self.opts.onChange
+    app.push(require("ui.rate").new(self.server, self.item, {
+        anchor = self.opts.anchor,
+        onChange = function() if onChange then onChange("rating") end end,
+    }))
 end
 
 function ItemMenu:removeContinue()

@@ -2,7 +2,8 @@
 --
 -- Sections (focus moves vertically between them):
 --   buttons   Play/Resume, Start over, Mark watched, Watchlist (films, shows),
---             Audio & Subtitles (shows: ui/showprefs.lua), Go to show
+--             Rate (your stars: ui/rate.lua), Audio & Subtitles (shows: ui/showprefs.lua),
+--             Go to show
 --   seasons   season tabs (shows)
 --   episodes  episode cards of the selected season
 --   related   "More like this"
@@ -61,6 +62,7 @@ function Detail:load(ratingKey, quiet)
     api.metadata(self.server, ratingKey, function(item, err)
         self.loading = false
         if not item then self.error = err; return end
+        if self.myRating and self.myRating.key == item.ratingKey then item.userRating = self.myRating.value end
         self.item = item
         self.backdrop:set(self.server, item.art or item.grandparentArt)
         if item.type == "show" then
@@ -156,8 +158,6 @@ function Detail:buildSections()
             buttons[#buttons + 1] = { label = "Start Over", icon = "restart",
                 run = function() self:play(target, 0) end }
         end
-        buttons[#buttons + 1] = { label = cast.isActive() and ("On " .. cast.session.device.name) or "Cast",
-            icon = "cast", run = function() self:cast(target) end }
     end
     if item.type ~= "show" then
         local watched = (tonumber(item.viewCount) or 0) > 0
@@ -169,6 +169,12 @@ function Detail:buildSections()
         buttons[#buttons + 1] = { label = on and "On Watchlist" or "Watchlist", icon = on and "check" or "plus",
             run = function() self:toggleWatchlist(not on) end }
     end
+    -- your stars (filled once rated): opens ui/rate.lua
+    local rating = math.floor((tonumber(item.userRating) or 0) + 0.5)
+    buttons[#buttons + 1] = {
+        label = rating > 0 and api.starsText(rating):gsub(" stars?$", "") or "Rate",
+        icon = "star", starFill = rating > 0 and 1 or 0, starColor = rating > 0 and theme.warning or nil,
+        run = function() self:rate() end }
     -- the show's track settings (an episode's page opens its show's)
     local show = item.type == "show" and item
         or item.type == "episode" and item.grandparentRatingKey
@@ -187,8 +193,14 @@ function Detail:buildSections()
     self.button = math.min(self.button, #buttons)
 end
 
+-- Casting starts from the player's controls; while this title is on a TV,
+-- Play opens its remote (the player, casting) instead of playing it here.
 function Detail:play(target, startAt)
     if not target then return end
+    local s = cast.session
+    if cast.isActive() and s.item and s.item.ratingKey == target.ratingKey and startAt == nil then
+        return app.push(require("player.scene").new(s.server, s.item, { cast = true }))
+    end
     -- episodes listed under a show are partial; fetch full metadata (Media/Part) first
     api.metadata(self.server, target.ratingKey, function(full, err)
         if not full then return app.notify(tostring(err), "error") end
@@ -196,13 +208,23 @@ function Detail:play(target, startAt)
     end)
 end
 
--- Cast button: the remote (the player, casting) if something is already casting,
--- else the device picker (resuming where the title was left, like Play).
-function Detail:cast(target)
-    local s = cast.session
-    if cast.isActive() then return app.push(require("player.scene").new(s.server, s.item, { cast = true })) end
-    app.push(require("ui.castpicker").new(self.server, target,
-        { offset = (tonumber(target.viewOffset) or 0) / 1000 }))
+-- Rate button: the star picker, opened below the button.
+function Detail:rate()
+    local anchor
+    for i, b in ipairs(self.buttons or {}) do
+        local r = (self.cardRects or {})["b" .. i]
+        if b.icon == "star" and r then anchor = r end
+    end
+    app.push(require("ui.rate").new(self.server, self.item, {
+        anchor = anchor, below = true,
+        -- closing the picker reloads the page (resume), which can answer before the
+        -- server has the new rating: keep showing the one just chosen
+        onChange = function(rating)
+            self.myRating = { key = self.item.ratingKey, value = rating }
+            self.item.userRating = rating
+            self:buildSections()
+        end,
+    }))
 end
 
 function Detail:toggleWatchlist(on)
@@ -459,7 +481,8 @@ function Detail:draw()
     local bx = pad
     for i, b in ipairs(self.buttons or {}) do
         local bw = W.button(b.label, bx, y, 62 * u, self.anim["b" .. i] or 0,
-            { primary = b.primary, icon = b.icon, progress = b.progress })
+            { primary = b.primary, icon = b.icon, progress = b.progress, starFill = b.starFill, starColor = b.starColor })
+        self.cardRects["b" .. i] = { x = bx, y = y, w = bw, h = 62 * u }
         mouse.region(bx, y, bw, 62 * u, {
             hover = function() self.mouseScroll = true; focusSection(self, "buttons"); self.button = i end,
             click = function() b.run() end,

@@ -56,6 +56,13 @@ library** and open their Seerr request page (their menu has **Request** and **Re
 show pages have a **Watchlist** button too. `lovec . --shots watchlist` checks the row, menus and buttons with
 every change answered locally, so your watchlist isn't touched.
 
+Ratings: film, show and episode pages have **Rate** (it shows your stars once you've rated, e.g. **3½**), and so
+does a card's menu (**Change Rating** when rated). It opens five stars in half steps: Left/Right or the pointer
+choose, Enter or a click saves, keys 1-5 give whole stars at once, and **Remove Rating** clears it. Ratings are
+saved on your server as Plex's own star rating, so they show in Plex's apps too (and count in For You's taste
+profile). `lovec . --shots rate` checks the button, picker and menu with the server's answers faked, so nothing
+is rated.
+
 Show audio and subtitles: a show's page (and its episodes' pages) has **Audio & Subtitles**: the show's own
 settings on the server, as in Plex Web's Edit > Advanced: **Audio language**, **Subtitle language** (type to filter,
 e.g. "japanese") and **Subtitles shown** (Account default, Manually selected, Shown with foreign audio, Always
@@ -107,15 +114,13 @@ whenever Windows can decode them. A limit (20 Mbps 1080p down to 1.5 Mbps 480p) 
 has the server convert anything bigger to that bitrate and size. The player's info line says "at 4 Mbps 720p" when
 it's converting to a limit.
 
-Casting: **Cast** on a film's or episode's page (next to Play), or the cast button in the player's control row
-(left of subtitles), opens **Play on…**, which lists the TVs it finds. Choosing one starts the title there, from where
-you left it (from the player: from the current point). The TV plays it in its own Plex app, streaming straight from
-the server, so progress is saved as usual. The player becomes the remote: the title's art with "Playing on <TV>",
+Casting: the cast button in the player's control row (left of subtitles) opens **Play on…**, which lists the TVs
+it finds. Choosing one starts the title there from the current point. The TV plays it in its own Plex app,
+streaming straight from the server, so progress is saved as usual. The player becomes the remote: the title's art with "Playing on <TV>",
 and the usual timeline drives the TV: the seek bar (click or drag), play / pause, back / forward, volume and mute,
 and subtitles and audio (Chromecast: saved on the server, and the TV reloads the title at the same point). The cast
 button, now lit, opens **Play on this computer** (takes it back where the TV got to), **Stop casting** and
-**Disconnect** (leaves it playing). Leaving the player keeps the TV playing, and the Cast button on the title's page
-then reads **On <TV name>** and brings the remote back.
+**Disconnect** (leaves it playing). Leaving the player keeps the TV playing; **Play** on that title's page brings the remote back.
 - **Chromecast / Google TV:** found with mDNS. Reel launches Plex's own Chromecast app (`9AC194DC`) and sends it the
   title, the server's address and token, and a play queue (so a show carries on to the next episode).
 - **Fire TV sticks and other DIAL TVs:** found at the addresses in `castDialHosts` in `settings.json` (Fire TV
@@ -191,7 +196,7 @@ Mouse:
 - `lovec . --casttest`: casting against stand-in devices on this PC (run `python tools/fakecast.py` first): finding a
   Chromecast and two Fire TV sticks (one blocked), launch, LOAD, pause, seek, mute and stop from the player's
   controls, opening Plex over DIAL, and the Fire TV remote over ADB (key sign-in checked with real RSA maths).
-  Nothing reaches a real TV or the server. `--shots casting` shows the Cast button on a film page (read-only).
+  Nothing reaches a real TV or the server.
 - `lovec . --castscan [dial-only]`: lists the TVs Reel can see and quits (looks only; launches nothing).
 - `lovec . --nvtest [ratingKey]`: opens one item's direct-play URL with nv_open and reports decode and seek timings.
 - `lovec . --transcodetest <ratingKey>`: runs the conversion path step by step (decision, stream headers, interleaved reads).
