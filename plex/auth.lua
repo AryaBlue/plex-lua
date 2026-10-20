@@ -88,6 +88,7 @@ function auth.signOut()
     client.settings.userHandle = nil
     client.settings.userThumb = nil
     client.settings.serverId = nil
+    client.settings.lastServer = nil     -- holds that server's access token
     client.save()
 end
 

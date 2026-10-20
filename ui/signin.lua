@@ -15,6 +15,10 @@ function SignIn.new()
 end
 
 function SignIn:enter()
+    -- signed in before and the last server is cached: open Home with it right
+    -- away; the sign-in check and the connection happen in the background
+    local cached = client.settings.token and require("plex.servers").cached()
+    if cached then return self:quickStart(cached) end
     if client.settings.token then
         auth.verify(function(user, err, unauthorized)
             if user then return self:signedIn(user) end
@@ -52,6 +56,21 @@ function SignIn:startLogin()
             self.error = err
         end,
     })
+end
+
+function SignIn:quickStart(server)
+    app.reset(require("ui.home").new(server))
+    server:quickConnect()
+    auth.verify(function(user, err, unauthorized)
+        if user then return client.rememberUser(user) end
+        if unauthorized then
+            -- token revoked: back to the sign-in code
+            auth.signOut()
+            app.reset(SignIn.new())
+        else
+            print("[signin] couldn't check the sign-in with plex.tv: " .. tostring(err))
+        end
+    end)
 end
 
 function SignIn:signedIn(user)

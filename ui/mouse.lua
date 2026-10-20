@@ -1,5 +1,5 @@
 -- Mouse support. Scenes register clickable regions while drawing:
---   mouse.region(x, y, w, h, { hover = fn, click = fn })
+--   mouse.region(x, y, w, h, { hover = fn, click = fn, context = fn (right click) })
 -- Events are tested against the regions from the last drawn frame, topmost first.
 -- Only the top scene's regions count, so overlays don't leak clicks below.
 
@@ -21,6 +21,7 @@ end
 function mouse.region(x, y, w, h, opts)
     if not mouse.active then return end
     local r = { x = x, y = y, w = w, h = h, hover = opts.hover, click = opts.click, wheel = opts.wheel,
+                context = opts.context,
                 block = opts.block }
     mouse.regions[#mouse.regions + 1] = r
 end
@@ -69,6 +70,9 @@ function mouse.pressed(x, y, button)
     if button == 1 then
         local r = find(x, y, "click")
         if r then r.click(x, y); return true end
+    elseif button == 2 then
+        local r = find(x, y, "context")
+        if r then r.context(x, y); return true end
     end
     return false
 end

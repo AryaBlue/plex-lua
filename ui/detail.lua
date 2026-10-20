@@ -1,16 +1,20 @@
 -- Detail page for a movie, show, season or episode.
 --
 -- Sections (focus moves vertically between them):
---   buttons   Play/Resume, Start over, Mark watched, Go to show
+--   buttons   Play/Resume, Start over, Mark watched, Watchlist (films, shows),
+--             Audio & Subtitles (shows: ui/showprefs.lua), Go to show
 --   seasons   season tabs (shows)
 --   episodes  episode cards of the selected season
 --   related   "More like this"
+--   cast      the cast (actors) from the metadata's Role tags; opens ui/person.lua
 
 local theme = require("theme")
 local gfx = require("ui.gfx")
 local W = require("ui.widgets")
 local api = require("plex.api")
 local mouse = require("ui.mouse")
+local watchlist = require("plex.watchlist")
+local cast = require("cast")
 
 local Detail = {}
 Detail.__index = Detail
@@ -23,10 +27,11 @@ function Detail.new(server, item)
         seasons = nil, season = 1,
         episodes = nil, episodeCol = 1,
         related = nil, relatedCol = 1,
+        castCol = 1,
         sections = {}, focus = 1, button = 1,
         anim = {}, scrollY = 0,
-        epScroll = 0, relScroll = 0,     -- first visible card of each row (target of anim.epScroll/relScroll)
-        epVisible = 3, relVisible = 6,   -- cards that fit across, measured while drawing
+        epScroll = 0, relScroll = 0, castScroll = 0,   -- first visible card of each row (target of anim.*Scroll)
+        epVisible = 3, relVisible = 6, castVisible = 8, -- cards that fit across, measured while drawing
         backdrop = W.newBackdrop(),
         loading = true,
     }, Detail)
@@ -34,6 +39,8 @@ function Detail.new(server, item)
 end
 
 function Detail:enter()
+    -- opened before Home fetched the watchlist: get it, for the Watchlist button
+    if not watchlist.loaded() then watchlist.load(function() self:buildSections() end) end
     local stub = self.stub
     if stub.type == "season" then
         -- a season opens its show with that season selected
@@ -129,6 +136,7 @@ function Detail:buildSections()
         s[#s + 1] = "episodes"
     end
     if self.related and #self.related > 0 then s[#s + 1] = "related" end
+    if item.Role and #item.Role > 0 then s[#s + 1] = "cast" end
     self.sections = s
     if self.focus > #s then self.focus = #s end
 
@@ -148,11 +156,27 @@ function Detail:buildSections()
             buttons[#buttons + 1] = { label = "Start Over", icon = "restart",
                 run = function() self:play(target, 0) end }
         end
+        buttons[#buttons + 1] = { label = cast.isActive() and ("On " .. cast.session.device.name) or "Cast",
+            icon = "cast", run = function() self:cast(target) end }
     end
     if item.type ~= "show" then
         local watched = (tonumber(item.viewCount) or 0) > 0
         buttons[#buttons + 1] = { label = watched and "Mark Unwatched" or "Mark Watched", icon = "check",
             run = function() self:toggleWatched(item, not watched) end }
+    end
+    if watchlist.guidOf(item) and (item.type == "movie" or item.type == "show") then
+        local on = watchlist.has(item)
+        buttons[#buttons + 1] = { label = on and "On Watchlist" or "Watchlist", icon = on and "check" or "plus",
+            run = function() self:toggleWatchlist(not on) end }
+    end
+    -- the show's track settings (an episode's page opens its show's)
+    local show = item.type == "show" and item
+        or item.type == "episode" and item.grandparentRatingKey
+            and { ratingKey = item.grandparentRatingKey, title = item.grandparentTitle }
+    if show then
+        buttons[#buttons + 1] = { label = "Audio & Subtitles", run = function()
+            app.push(require("ui.showprefs").new(self.server, show))
+        end }
     end
     if item.type == "episode" and item.grandparentRatingKey then
         buttons[#buttons + 1] = { label = "Go to Show", run = function()
@@ -172,12 +196,39 @@ function Detail:play(target, startAt)
     end)
 end
 
+-- Cast button: the remote (the player, casting) if something is already casting,
+-- else the device picker (resuming where the title was left, like Play).
+function Detail:cast(target)
+    local s = cast.session
+    if cast.isActive() then return app.push(require("player.scene").new(s.server, s.item, { cast = true })) end
+    app.push(require("ui.castpicker").new(self.server, target,
+        { offset = (tonumber(target.viewOffset) or 0) / 1000 }))
+end
+
+function Detail:toggleWatchlist(on)
+    local item = self.item
+    watchlist.set(item, on, function(ok, err)
+        if not ok then return app.notify("Couldn't update the watchlist: " .. tostring(err), "error") end
+        app.notify(on and "Added to your watchlist" or "Removed from your watchlist")
+        self:buildSections()
+    end)
+end
+
 function Detail:toggleWatched(item, watched)
     api.setWatched(self.server, item, watched, function(ok, err)
         if not ok then return app.notify("Couldn't update: " .. tostring(err), "error") end
         app.notify(watched and "Marked as watched" or "Marked as unwatched")
         self:load(self.item.ratingKey, true)
     end)
+end
+
+-- Options for an episode or related card (right click, its ⋯ button, or
+-- Tab / Y). Marking an episode reloads the page (season counts, Up Next).
+function Detail:itemMenu(item, anchor)
+    require("ui.itemmenu").open(self.server, item, {
+        anchor = anchor,
+        onChange = function() self:load(self.item.ratingKey, true) end,
+    })
 end
 
 function Detail:action(a)
@@ -212,13 +263,24 @@ function Detail:action(a)
         if a == "left" then self.episodeCol = math.max(1, self.episodeCol - 1); self:buildSections()
         elseif a == "right" then self.episodeCol = math.min(#self.episodes, self.episodeCol + 1); self:buildSections()
         elseif a == "accept" or a == "playpause" then self:play(self.episodes[self.episodeCol])
+        elseif a == "menu" then self:itemMenu(self.episodes[self.episodeCol], (self.cardRects or {})["e" .. self.episodeCol])
         end
     elseif sec == "related" and self.related then
         if a == "left" then self.relatedCol = math.max(1, self.relatedCol - 1)
         elseif a == "right" then self.relatedCol = math.min(#self.related, self.relatedCol + 1)
         elseif a == "accept" then app.push(Detail.new(self.server, self.related[self.relatedCol]))
+        elseif a == "menu" then self:itemMenu(self.related[self.relatedCol], (self.cardRects or {})["r" .. self.relatedCol])
+        end
+    elseif sec == "cast" and self.item.Role then
+        if a == "left" then self.castCol = math.max(1, self.castCol - 1)
+        elseif a == "right" then self.castCol = math.min(#self.item.Role, self.castCol + 1)
+        elseif a == "accept" then self:openPerson(self.item.Role[self.castCol])
         end
     end
+end
+
+function Detail:openPerson(person)
+    if person and person.id then app.push(require("ui.person").new(self.server, person)) end
 end
 
 -- Keep card `col` inside the visible window, with a neighbour showing where possible.
@@ -238,6 +300,8 @@ function Detail:page(which, dir)
     self.pointerFocus, self.mouseScroll = true, true
     if which == "episodes" then
         self.epScroll = clampScroll(self.epScroll + dir * math.max(1, self.epVisible - 1), #self.episodes, self.epVisible)
+    elseif which == "cast" then
+        self.castScroll = clampScroll(self.castScroll + dir * math.max(1, self.castVisible - 1), #self.item.Role, self.castVisible)
     else
         self.relScroll = clampScroll(self.relScroll + dir * math.max(1, self.relVisible - 1), #self.related, self.relVisible)
     end
@@ -255,23 +319,31 @@ function Detail:update(dt)
     for i = 1, #(self.buttons or {}) do ease("b" .. i, (sec == "buttons" and self.button == i and not self.backFocus) and 1 or 0) end
     for i = 1, #(self.episodes or {}) do ease("e" .. i, (sec == "episodes" and self.episodeCol == i) and 1 or 0) end
     for i = 1, #(self.related or {}) do ease("r" .. i, (sec == "related" and self.relatedCol == i) and 1 or 0) end
+    local cast = self.item and self.item.Role or {}
+    for i = 1, #cast do ease("c" .. i, (sec == "cast" and self.castCol == i) and 1 or 0) end
     ease("seasons", sec == "seasons" and 1 or 0)
     -- rows follow keyboard focus; when the pointer chose the card (or paged with
     -- the arrows) the row stays where it is
     if not self.pointerFocus then
         self.epScroll = followCol(self.epScroll, self.episodeCol, self.epVisible)
         self.relScroll = followCol(self.relScroll, self.relatedCol, self.relVisible)
+        self.castScroll = followCol(self.castScroll, self.castCol, self.castVisible)
     end
     self.epScroll = clampScroll(self.epScroll, #(self.episodes or {}), self.epVisible)
     self.relScroll = clampScroll(self.relScroll, #(self.related or {}), self.relVisible)
     ease("epScroll", self.epScroll)
+    self.castScroll = clampScroll(self.castScroll, #cast, self.castVisible)
     ease("relScroll", self.relScroll)
+    ease("castScroll", self.castScroll)
     -- scroll the page so lower sections come into view
     local h = love.graphics.getHeight()
     if not self.mouseScroll then
         local target = 0
         if sec == "episodes" and self.episodesBottom then target = math.max(0, self.episodesBottom - h + 40) end
         if sec == "related" and self.relatedY then target = math.max(0, self.relatedY - h * 0.45) end
+        if sec == "cast" and self.castY then
+            target = math.max(0, math.min(self.castY - h * 0.45, (self.contentBottom or 0) - h + 40))
+        end
         self.scrollTarget = target
     end
     self.scrollY = gfx.approach(self.scrollY, self.scrollTarget or 0, dt, 12)
@@ -296,6 +368,8 @@ local function rowWheel(self, which)
             self:buildSections()
         elseif which == "related" and self.related then
             self.relatedCol = math.max(1, math.min(#self.related, self.relatedCol + step))
+        elseif which == "cast" and self.item.Role then
+            self.castCol = math.max(1, math.min(#self.item.Role, self.castCol + step))
         end
         return true
     end
@@ -338,6 +412,7 @@ function Detail:draw()
     local u = gfx.unit()
     local pad = 90 * u
     love.graphics.clear(theme.bg)
+    self.cardRects = {}           -- card positions this frame, for the options menu
 
     -- backdrop on the right, fading into the page on the left and bottom
     self.backdrop:draw(w * 0.25, -self.scrollY, w * 0.75, h * 0.8, 1, 0.2)
@@ -431,6 +506,8 @@ function Detail:draw()
                 if cx > w then break end
                 if cx + cw > 0 then
                     W.card(self.server, e, cx, y, cw, ch, self.anim["e" .. c] or 0, "wide")
+                    local rect = { x = cx, y = y, w = cw, h = ch }
+                    self.cardRects["e" .. c] = rect
                     mouse.region(cx, y, cw, ch, {
                         hover = function() self.mouseScroll = true;
                             focusSection(self, "episodes")
@@ -438,7 +515,9 @@ function Detail:draw()
                             if self.episodeCol ~= c then self.episodeCol = c; self:buildSections() end
                         end,
                         click = function() self:play(e) end,
+                        context = function() self:itemMenu(e, rect) end,
                     })
+                    W.moreButton(cx, y, cw, ch, self.anim["e" .. c] or 0, "wide", function() self:itemMenu(e, rect) end)
                 end
             end
             self.episodeRow = { y = y, h = ch }   -- for tools/shots.lua
@@ -470,14 +549,44 @@ function Detail:draw()
             if cx > w then break end
             if cx + cw > 0 then
                 W.card(self.server, r, cx, y, cw, chR, self.anim["r" .. c] or 0, "poster")
+                local rect = { x = cx, y = y, w = cw, h = chR }
+                self.cardRects["r" .. c] = rect
                 mouse.region(cx, y, cw, chR, {
                     hover = function() self.mouseScroll = true; focusSection(self, "related"); self.pointerFocus = true; self.relatedCol = c end,
                     click = function() app.push(Detail.new(self.server, r)) end,
+                    context = function() self:itemMenu(r, rect) end,
                 })
+                W.moreButton(cx, y, cw, chR, self.anim["r" .. c] or 0, "poster", function() self:itemMenu(r, rect) end)
             end
         end
         rowArrows(self, "related", y, chR, self.anim.relScroll or 0, #self.related, self.relVisible)
         y = y + chR + 90 * u
+    end
+
+    -- cast
+    local cast = item.Role
+    if cast and #cast > 0 then
+        self.castY = y + self.scrollY
+        gfx.text("Cast", pad, y, 30 * u, self.sections[self.focus] == "cast" and theme.text or theme.textDim)
+        y = y + 54 * u
+        local cw, gap = 150 * u, 34 * u
+        local rowH = cw + 70 * u        -- portrait, name, character
+        local off = (self.anim.castScroll or 0) * (cw + gap)
+        self.castVisible = math.max(1, math.floor((w - pad - 40 * u + gap) / (cw + gap)))
+        mouse.region(0, y, w, rowH, { wheel = rowWheel(self, "cast") })
+        for c, person in ipairs(cast) do
+            local cx = pad + (c - 1) * (cw + gap) - off
+            if cx > w then break end
+            if cx + cw > 0 then
+                W.personCard(self.server, person, cx, y, cw, self.anim["c" .. c] or 0)
+                mouse.region(cx - gap / 2, y, cw + gap, rowH, {
+                    hover = function() self.mouseScroll = true; focusSection(self, "cast"); self.pointerFocus = true; self.castCol = c end,
+                    click = function() self:openPerson(person) end,
+                })
+            end
+        end
+        rowArrows(self, "cast", y, cw, self.anim.castScroll or 0, #cast, self.castVisible)
+        y = y + rowH + 70 * u
     end
     self.contentBottom = y + self.scrollY
 

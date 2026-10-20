@@ -42,13 +42,18 @@ function app.toggleFullscreen()
     love.window.setFullscreen(not love.window.getFullscreen(), "desktop")
 end
 
-function app.notify(msg, kind)
-    app.toast = { msg = msg, kind = kind or "info", t = 0 }
-    print("[" .. (kind or "info") .. "] " .. msg)
+-- opts (optional): heading = small line above msg, image = poster URL, duration = seconds.
+function app.notify(msg, kind, opts)
+    opts = opts or {}
+    app.toast = { msg = msg, kind = kind or "info", t = 0, heading = opts.heading, image = opts.image,
+                  duration = opts.duration or 4 }
+    print("[" .. (kind or "info") .. "] " .. (opts.heading and opts.heading .. ": " or "") .. msg)
 end
 
 function love.load(args)
     love.keyboard.setKeyRepeat(false)
+    love.graphics.setDefaultFilter("nearest", "nearest", 1)
+
     client.load()
     theme.apply(client.settings.theme)
     http.init()
@@ -59,8 +64,10 @@ function love.load(args)
     for _, codec in ipairs({ "h264", "hevc", "vp9", "av1", "mpeg4", "mpeg2video", "vc1" }) do
         if NativeVideo.hasVideoDecoder(codec) then app.videoCodecs[#app.videoCodecs + 1] = codec end
     end
-    require("plex.playback").setCapabilities(app.videoCodecs)
-    print("[video] Windows decoders: " .. table.concat(app.videoCodecs, ", "))
+    app.opusSurround = NativeVideo.canDecodeOpusSurround()
+    require("plex.playback").setCapabilities(app.videoCodecs, { opusSurround = app.opusSurround })
+    print("[video] Windows decoders: " .. table.concat(app.videoCodecs, ", ")
+        .. (app.opusSurround and "; surround Opus via libopus" or "; no libopus (surround Opus is converted)"))
     input.setHandler(function(action, isRepeat)
         local top = app.top()
         if top and top.action then top:action(action, isRepeat) end
@@ -88,6 +95,14 @@ function love.load(args)
                 return require("tools.shots").startPlayer()
             end
         end
+        if a == "--castscan" then
+            app.selftest = require("tools.castscan")
+            return app.selftest.start(app.args)
+        end
+        if a == "--casttest" then
+            app.selftest = require("tools.casttest")
+            return app.selftest.start(app.args)
+        end
         if a == "--selftest" then
             app.selftest = require("tools.selftest")
             return app.selftest.start()
@@ -101,7 +116,8 @@ function love.update(dt)
     http.update()
     input.update(dt)
     gfx.update()
-    if app.selftest then app.selftest.update(dt) end
+    require("cast").update(dt)
+    if app.selftest then app.selftest.update(dt) else require("seerr.notify").update(dt) end
     local top = app.top()
     if top and top.update then top:update(dt) end
     -- Scenes below the top that need ticking (e.g. a player behind an overlay) set alwaysUpdate.
@@ -111,12 +127,49 @@ function love.update(dt)
     end
     if app.toast then
         app.toast.t = app.toast.t + dt
-        if app.toast.t > 4 then app.toast = nil end
+        if app.toast.t > app.toast.duration then app.toast = nil end
     end
 end
 
 local w, h = love.graphics.getDimensions()
+
+-- A toast with a heading (request notifications): poster, heading in the
+-- kind's colour, title; slides in at the top right.
+local function drawCard(t)
+    local u = gfx.unit()
+    local a = math.min(1, (t.duration - t.t) * 3, t.t * 4)
+    local img = t.image and gfx.remote(t.image)
+    local ph = 96 * u
+    local pw = t.image and ph * 2 / 3 or 0
+    local maxText = 380 * u
+    local title = gfx.fit(t.msg, 26 * u, maxText)
+    local cw = 24 * u + (pw > 0 and pw + 18 * u or 0)
+        + math.max(gfx.width(title, 26 * u), gfx.width(t.heading, 19 * u)) + 28 * u
+    local ch = ph + 24 * u
+    local x = w - 40 * u - cw + (1 - a) * 40 * u
+    local y = 104 * u                 -- under the nav bar (avatar, server name)
+    gfx.color({ 0, 0, 0 }, 0.35 * a)
+    gfx.roundRect("fill", x - 2 * u, y + 4 * u, cw + 4 * u, ch + 4 * u, 14 * u)
+    gfx.color(theme.surface, 0.97 * a)
+    gfx.roundRect("fill", x, y, cw, ch, 12 * u)
+    local col = t.kind == "error" and theme.danger or (t.kind == "success" and theme.success or theme.accent)
+    gfx.color(col, a)
+    love.graphics.rectangle("fill", x, y + 16 * u, 4 * u, ch - 32 * u)
+    local tx = x + 24 * u
+    if pw > 0 then
+        gfx.color(theme.surfaceHi, a)
+        gfx.roundRect("fill", tx, y + 12 * u, pw, ph, 6 * u)
+        if img then
+            gfx.drawCover(img, tx, y + 12 * u, pw, ph, a, 0.5, 0.5)
+        end
+        tx = tx + pw + 18 * u
+    end
+    gfx.text(t.heading, tx, y + ch / 2 - 34 * u, 19 * u, col, a)
+    gfx.text(title, tx, y + ch / 2 - 6 * u, 26 * u, theme.text, a)
+end
+
 function love.draw()
+    w, h = love.graphics.getDimensions()
     -- Draw from the topmost opaque scene upward.
     local first = #app.stack
     while first > 1 and app.stack[first].overlay do first = first - 1 end
@@ -128,9 +181,11 @@ function love.draw()
     end
     mouse.active = true
 
-    if app.toast then
+    if app.toast and app.toast.heading then
+        drawCard(app.toast)
+    elseif app.toast then
         local u = gfx.unit()
-        local a = math.min(1, (4 - app.toast.t) * 3)
+        local a = math.min(1, (app.toast.duration - app.toast.t) * 3)
         local msg = gfx.fit(app.toast.msg, 26 * u, w * 0.6)
         local tw = gfx.width(msg, 26 * u) + 48 * u
         local col = app.toast.kind == "error" and theme.danger or theme.surfaceHi
@@ -203,5 +258,6 @@ function love.quit()
         local s = app.stack[i]
         if s.leave then s:leave() end
     end
+    require("cast").stop(false)     -- let the TV connections' threads end (the TV keeps playing)
     http.shutdown()
 end

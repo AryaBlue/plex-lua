@@ -21,13 +21,16 @@ void        nv_audio_close(nv_audio* a);
 nv_audio*   nv_audio_open_shared(nv_video* v);
 nv_video*   nv_open_av(const char* path_utf8);
 int         nv_has_video_decoder(const char* codec);
+void        nv_set_audio_track(int index);
+int         nv_can_decode_opus_surround(void);
 ]]
 
 local NativeVideo = {}
 NativeVideo.__index = NativeVideo
 
 local SEEK_THRESHOLD = 1.0
-local lib
+local CATCHUP_FRAMES = 8    -- frames a stream that can't seek may decode per update to catch up
+local lib, libPath
 
 local lf = love.filesystem
 local newImage = love.graphics.newImage or love.graphics.newTexture
@@ -50,7 +53,7 @@ local function load_library()
     local errors = {}
     for _, path in ipairs(candidates) do
         local ok, result = pcall(ffi.load, path)
-        if ok then lib = result; return lib end
+        if ok then lib, libPath = result, path; return lib end
         table.insert(errors, result)
     end
     error("NativeVideo: could not load " .. file .. ":\n  " .. table.concat(errors, "\n  "), 3)
@@ -98,6 +101,8 @@ end
 
 -- opts.audio = true: also carry the audio track, for NativeVideo.newAudio(video)
 -- (one file handle / connection for picture and sound).
+-- opts.seekable = false: a live stream (e.g. one a server is converting) that
+-- can't seek; following a clock then only ever decodes forward.
 function NativeVideo.new(path, opts)
     local L = load_library()
     local real_path = resolve_path(path)
@@ -132,6 +137,7 @@ function NativeVideo.new(path, opts)
     self.loop     = false
     self.speed    = 1
     self.frameIndex = 0     -- frames shown so far (for stats)
+    self.seekable = not (opts and opts.seekable == false)
 
     self:_decodeIntoBack()
     self:_presentBack()
@@ -165,12 +171,14 @@ function NativeVideo:_presentBack()
     self:_decodeIntoBack()
 end
 
--- Show every frame whose time has come
-function NativeVideo:_advanceTo(t)
+-- Show every frame whose time has come (at most `limit` of them, if given)
+function NativeVideo:_advanceTo(t, limit)
     -- exact frame time, which would otherwise show the frame one tick late.
     t = t + 1e-6
-    while self.backPts and self.backPts <= t do
+    local n = 0
+    while self.backPts and self.backPts <= t and not (limit and n >= limit) do
         self:_presentBack()
+        n = n + 1
     end
     if self.dirty then
         self.image:replacePixels(self.front)
@@ -224,6 +232,13 @@ end
 
 --- Follow an external clock, video:setTime(music:tell()).
 function NativeVideo:setTime(t)
+    if not self.seekable then
+        -- can't seek: behind, decode forward a few frames per update until caught
+        -- up; ahead, hold the frame until the clock reaches it
+        self.time = t
+        self:_advanceTo(t, CATCHUP_FRAMES)
+        return
+    end
     if t < self.time or t - self.time > SEEK_THRESHOLD then
         self:seek(t)
     else
@@ -263,17 +278,46 @@ function NativeVideo:release()
     if self.back then self.back:release(); self.back = nil end
 end
 
+-- The library's path, for loading it on another thread (lib/VideoStream.lua).
+function NativeVideo.libraryPath()
+    load_library()
+    return libPath
+end
+
+-- A path or URL as the decoder wants it (files inside the game are copied out).
+function NativeVideo.resolve(path)
+    return resolve_path(path)
+end
+
 function NativeVideo.getBackend()
     return ffi.string(load_library().nv_backend())
 end
 
 --- true/false if the OS can decode `codec` ("h264", "hevc", "vp9", "av1", ...),
 -- nil if this backend can't tell.
+-- Audio track for files opened from now on: 1 = the first audio track in the
+-- file, 2 = the second... Returns false if this build/backend can't choose.
+function NativeVideo.setAudioTrack(n)
+    local L = load_library()
+    local ok = pcall(function() return L.nv_set_audio_track end)
+    if not ok then return false end
+    L.nv_set_audio_track(math.max(0, (n or 1) - 1))
+    return true
+end
+
 function NativeVideo.hasVideoDecoder(codec)
     local L = load_library()
     local ok, r = pcall(function() return L.nv_has_video_decoder(codec) end)
     if not ok or r < 0 then return nil end
     return r == 1
+end
+
+-- Whether Opus with more than two channels plays (Windows' decoder doesn't take
+-- it; the DLL uses libopus, opus.dll, when it can find it).
+function NativeVideo.canDecodeOpusSurround()
+    local L = load_library()
+    local ok, r = pcall(function() return L.nv_can_decode_opus_surround() end)
+    return ok and r == 1
 end
 
 --- Keep the picture locked to an audio clock (seconds of media time, e.g. audio:tell()).
@@ -413,6 +457,14 @@ function Audio:seek(t)
     t = math.max(0, t)
     local wasPlaying = self.playing
     self.source:stop()              -- unqueues every buffer
+    if self.source:getFreeBufferCount() < self.bufferCount then
+        -- a source that never started keeps its queue through stop() (seeking
+        -- right after opening, e.g. resuming part way in): start a fresh one
+        local volume = self.source:getVolume()
+        self.source:release()
+        self.source = love.audio.newQueueableSource(self.sampleRate, 16, self.channels, self.bufferCount)
+        self.source:setVolume(volume)
+    end
     self.chunks = {}
     if lib.nv_audio_seek(self.handle, t) ~= 1 then
         error("NativeVideo: " .. ffi.string(lib.nv_last_error()), 2)

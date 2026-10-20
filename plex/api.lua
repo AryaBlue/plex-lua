@@ -56,12 +56,27 @@ function api.sections(server, callback)
 end
 
 -- One page of a library: GET /library/sections/{id}/all with a media query sort.
+-- genre: optional genre id (from api.genres) to show only that genre.
 -- callback(items, totalSize | nil, err)
-function api.sectionItems(server, sectionKey, sort, start, size, callback)
-    return get(server, "/library/sections/" .. sectionKey .. "/all", { sort = sort }, function(mc, err)
+function api.sectionItems(server, sectionKey, sort, start, size, callback, genre)
+    return get(server, "/library/sections/" .. sectionKey .. "/all", { sort = sort, genre = genre }, function(mc, err)
         if not mc then return callback(nil, err) end
         callback(mc.Metadata or {}, tonumber(mc.totalSize) or tonumber(mc.size) or 0)
     end, { start = start, size = size })
+end
+
+-- Genres used in a library: GET /library/sections/{id}/genre. callback({ {id, title} }) or nil, err.
+function api.genres(server, sectionKey, callback)
+    return get(server, "/library/sections/" .. sectionKey .. "/genre", nil, function(mc, err)
+        if not mc then return callback(nil, err) end
+        local list = {}
+        for _, d in ipairs(mc.Directory or {}) do
+            -- key is the bare id, or a path ending in ?genre=id on some servers
+            local id = d.key and (tostring(d.key):match("genre=(%d+)") or tostring(d.key))
+            if id and d.title then list[#list + 1] = { id = id, title = d.title } end
+        end
+        callback(list)
+    end)
 end
 
 function api.metadata(server, ratingKey, callback)
@@ -139,6 +154,21 @@ function api.search(server, query, callback)
         end
         local hubs = {}
         for _, hub in ipairs(mc.Hub or {}) do
+            if hub.type == "genre" then
+                -- one tag per library that has the genre: opens that library filtered to it
+                local items = {}
+                for _, t in ipairs(hub.Metadata or hub.Directory or {}) do
+                    local section = t.librarySectionID or (t.key or ""):match("/sections/(%d+)/")
+                    local name = t.tag or t.title
+                    if section and t.id and name then
+                        items[#items + 1] = { type = "genre", title = name, genre = tostring(t.id),
+                                              sectionKey = tostring(section), sectionTitle = t.librarySectionTitle, count = tonumber(t.count),
+                                              ratingKey = "genre:" .. section .. ":" .. t.id }
+                    end
+                end
+                if #items > 0 then hubs[#hubs + 1] = { title = "Genres", type = "genre", hub = hub, items = items } end
+                goto continue
+            end
             local items, seen = {}, {}
             for _, list in ipairs({ hub.Metadata or {}, hub.Directory or {} }) do
                 for _, it in ipairs(list) do
@@ -149,6 +179,7 @@ function api.search(server, query, callback)
                 end
             end
             if #items > 0 then hubs[#hubs + 1] = { title = hub.title or "", type = hub.type, hub = hub, items = items } end
+            ::continue::
         end
         callback(hubs)
     end)
@@ -193,6 +224,14 @@ function api.timeline(server, item, state, time, duration, sessionId)
     }, function() end)
 end
 
+-- GET /video/:/transcode/universal/stop: end a conversion the player has left.
+function api.stopTranscode(server, sessionId)
+    return http.request({
+        method = "GET", headers = client.headers(server.accessToken), timeout = 10,
+        url = url(server, "/video/:/transcode/universal/stop", { session = sessionId }),
+    }, function() end)
+end
+
 -- PUT /:/scrobble or /:/unscrobble (mark watched / unwatched).
 function api.setWatched(server, item, watched, callback)
     local path = watched and "/:/scrobble" or "/:/unscrobble"
@@ -204,6 +243,68 @@ function api.setWatched(server, item, watched, callback)
     end)
 end
 
+-- PUT /actions/removeFromContinueWatching (the library provider's action, as
+-- Plex Web sends it): hides an item from Continue Watching.
+function api.removeFromContinueWatching(server, item, callback)
+    return http.request({
+        method = "PUT", headers = client.headers(server.accessToken), timeout = 15,
+        url = url(server, "/actions/removeFromContinueWatching", { ratingKey = item.ratingKey }),
+    }, function(res, err)
+        if callback then callback(res and res.status >= 200 and res.status < 300, err or (res and "HTTP " .. res.status)) end
+    end)
+end
+
+-- An item's own settings (shows: preferred audio and subtitle language,
+-- subtitle mode), as Plex Web's Edit > Advanced shows them.
+-- callback(settings) or nil, err; each { id, label, value, default, options = { {value, label} } }
+function api.itemPrefs(server, ratingKey, callback)
+    return get(server, "/library/metadata/" .. ratingKey, { includePreferences = 1 }, function(mc, err)
+        local item = mc and mc.Metadata and mc.Metadata[1]
+        if not item then return callback(nil, err or "not found") end
+        local out = {}
+        for _, st in ipairs(item.Preferences and item.Preferences.Setting or {}) do
+            local options, seen = {}, {}
+            for pair in tostring(st.enumValues or ""):gmatch("[^|]+") do
+                local value, label = pair:match("^([^:]*):(.*)$")
+                if value then
+                    -- the list has e.g. English for "en" and again for "en-US"
+                    if seen[label] then label = label .. " (" .. value .. ")" end
+                    seen[label] = true
+                    options[#options + 1] = { value = value, label = label }
+                end
+            end
+            out[#out + 1] = { id = st.id, label = st.label, value = tostring(st.value or ""),
+                              default = tostring(st.default or ""), options = options }
+        end
+        callback(out)
+    end)
+end
+
+-- PUT /library/metadata/{id}/prefs?name=value...  callback(ok, err)
+function api.setItemPrefs(server, ratingKey, values, callback)
+    return http.request({
+        method = "PUT", headers = client.headers(server.accessToken), timeout = 15,
+        url = url(server, "/library/metadata/" .. ratingKey .. "/prefs", values),
+    }, function(res, err)
+        if callback then callback(res and res.status >= 200 and res.status < 300, err or (res and "HTTP " .. res.status)) end
+    end)
+end
+
+-- Watched state of an item: watched (all of it), started (partly, or some episodes).
+function api.watchState(item)
+    local leaves, viewed = tonumber(item.leafCount), tonumber(item.viewedLeafCount)
+    if leaves then return (viewed or 0) >= leaves, (viewed or 0) > 0 end
+    local count, offset = tonumber(item.viewCount) or 0, (tonumber(item.viewOffset) or 0) > 0
+    return count > 0 and not offset, count > 0 or offset
+end
+
+-- Update an item after marking it, so its card redraws without a reload.
+function api.applyWatched(item, watched)
+    item.viewOffset = nil
+    item.viewCount = watched and math.max(1, tonumber(item.viewCount) or 0) or nil
+    if item.leafCount then item.viewedLeafCount = watched and item.leafCount or 0 end
+end
+
 -- GET /hubs/metadata/{id}/related ("More like this").
 function api.related(server, ratingKey, callback)
     return get(server, "/hubs/metadata/" .. ratingKey .. "/related", { count = 20 }, function(mc, err)
@@ -212,6 +313,33 @@ function api.related(server, ratingKey, callback)
             if hub.Metadata and #hub.Metadata > 0 then return callback(hub.Metadata, hub.title) end
         end
         callback({})
+    end)
+end
+
+-- Everything an actor (a Role's id) is in, per film and TV library, newest first.
+-- callback({ { title = section title, items } }) or nil, err.
+function api.byActor(server, actorId, callback)
+    api.sections(server, function(list, err)
+        if not list then return callback(nil, err) end
+        local libs = {}
+        for _, s in ipairs(list) do
+            if s.type == "movie" or s.type == "show" then libs[#libs + 1] = s end
+        end
+        local rows, left, failed = {}, #libs, nil
+        if left == 0 then return callback({}) end
+        for i, s in ipairs(libs) do
+            get(server, "/library/sections/" .. s.key .. "/all", { actor = actorId, sort = "originallyAvailableAt:desc" },
+                function(mc, ferr)
+                    if mc and mc.Metadata and #mc.Metadata > 0 then rows[i] = { title = s.title, items = mc.Metadata } end
+                    if not mc then failed = ferr end
+                    left = left - 1
+                    if left > 0 then return end
+                    local out = {}
+                    for j = 1, #libs do if rows[j] then out[#out + 1] = rows[j] end end
+                    if #out == 0 and failed then return callback(nil, failed) end
+                    callback(out)
+                end)
+        end
     end)
 end
 
@@ -242,6 +370,14 @@ function api.isPlayable(item)
 end
 
 -- "1h 52m" / "48m" from milliseconds.
+-- Seconds as a clock: 4:05, 1:02:03.
+function api.clock(t)
+    t = math.max(0, math.floor(t or 0))
+    local h, m, sec = math.floor(t / 3600), math.floor(t / 60) % 60, t % 60
+    if h > 0 then return ("%d:%02d:%02d"):format(h, m, sec) end
+    return ("%d:%02d"):format(m, sec)
+end
+
 function api.runtime(ms)
     local mins = math.floor((tonumber(ms) or 0) / 60000 + 0.5)
     if mins >= 60 then return ("%dh %dm"):format(math.floor(mins / 60), mins % 60) end

@@ -1,11 +1,13 @@
 -- Settings (from the profile menu): auto play, the countdown before the next
--- episode starts, colour theme, and account actions. Choices apply and save
+-- episode starts, streaming quality at home and away, colour theme, and
+-- account actions. Choices apply and save
 -- straight away; left/right on a row changes it.
 
 local theme = require("theme")
 local gfx = require("ui.gfx")
 local W = require("ui.widgets")
 local client = require("plex.client")
+local playback = require("plex.playback")
 local auth = require("plex.auth")
 local mouse = require("ui.mouse")
 
@@ -21,6 +23,8 @@ function Settings.new(server)
 
     local delays = {}
     for _, d in ipairs(DELAYS) do delays[#delays + 1] = { label = d .. " seconds", value = d } end
+    local qualities = {}
+    for _, q in ipairs(playback.QUALITIES) do qualities[#qualities + 1] = { label = q.label, value = q.kbps } end
     local themes = {}
     for _, p in ipairs(theme.presets) do themes[#themes + 1] = { label = p.name, value = p.id, preset = p } end
 
@@ -33,6 +37,12 @@ function Settings.new(server)
           desc = "How long \"Playing Next\" waits before starting the next episode.",
           options = delays, get = setting("autoPlayDelay"), set = save("autoPlayDelay"),
           disabled = function() return client.settings.autoPlay == false end },
+        { section = "Quality", title = "At Home",
+          desc = "Server on this network. Original plays files as they are; a limit converts anything bigger.",
+          options = qualities, get = setting("qualityHome"), set = save("qualityHome"), key = "qualityHome" },
+        { title = "Away",
+          desc = "Streaming over the internet or through Plex's relay.",
+          options = qualities, get = setting("qualityAway"), set = save("qualityAway"), key = "qualityAway" },
         { section = "Appearance", title = "Theme", kind = "swatch",
           desc = "Colours for the whole app.",
           options = themes, get = setting("theme"),
@@ -47,6 +57,13 @@ function Settings.new(server)
               end },
           } },
     }
+    -- say which quality row this connection uses
+    if server and server.active then
+        local key = playback.settingKey(server)
+        for _, r in ipairs(self.rows) do
+            if r.key == key then r.desc = r.desc .. "  (in use now)" end
+        end
+    end
     for _, r in ipairs(self.rows) do r.col = self:currentIndex(r) end
     return self
 end
@@ -175,6 +192,9 @@ function Settings:draw()
             local bh = 54 * u
             for c, o in ipairs(r.options) do
                 local on = r.kind ~= "buttons" and o.value == current
+                if x > pad and x + W.buttonWidth(o.label, bh, on and "check" or nil) > w - pad then
+                    x, y = pad, y + bh + 16 * u     -- wrap long rows (the quality list)
+                end
                 local bw = W.button(o.label, x, y, bh, focused and self.anim[i * 100 + c] or 0,
                     { primary = on and not dim, icon = on and "check" or nil })
                 mouse.region(x, y, bw, bh, {

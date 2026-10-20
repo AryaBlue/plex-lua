@@ -68,8 +68,33 @@ function W.topCard(anim, first, last)
     return top
 end
 
+-- A genre (search result): its name and which library, on a plain tile.
+W.GENRE_W, W.GENRE_H = 280, 104
+local function genreTile(item, x, y, w, h, focus)
+    local u = gfx.unit()
+    local s = 1 + 0.05 * focus
+    local dw, dh = w * s, h * s
+    local dx, dy = x + (w - dw) / 2, y + (h - dh) / 2
+    love.graphics.setColor(0, 0, 0, 0.3 + 0.2 * focus)
+    gfx.roundRect("fill", dx + 3 * u, dy + 6 * u, dw, dh, 10 * u)
+    gfx.color(theme.surfaceHi)
+    gfx.roundRect("fill", dx, dy, dw, dh, 10 * u)
+    gfx.color(theme.accent)
+    gfx.roundRect("fill", dx + 16 * u, dy + 22 * u, 5 * u, dh - 44 * u, 2 * u)
+    gfx.text(gfx.fit(item.title, 28 * u, dw - 56 * u), dx + 36 * u, dy + 18 * u, 28 * u, theme.text)
+    local sub = item.sectionTitle or "Library"
+    if item.count then sub = ("%s · %d titles"):format(sub, item.count) end
+    gfx.text(gfx.fit(sub, 19 * u, dw - 56 * u), dx + 36 * u, dy + dh - 40 * u, 19 * u, theme.textDim)
+    if focus > 0.01 then
+        gfx.color(theme.text, focus)
+        love.graphics.setLineWidth(3 * u)
+        gfx.roundRect("line", dx - 2 * u, dy - 2 * u, dw + 4 * u, dh + 4 * u, 12 * u)
+    end
+end
+
 -- An artwork card. Returns nothing; draws title under the card when focused.
 function W.card(server, item, x, y, w, h, focus, kind)
+    if kind == "genre" then return genreTile(item, x, y, w, h, focus or 0) end
     local u = gfx.unit()
     focus = focus or 0
     local s = 1 + 0.07 * focus
@@ -105,9 +130,9 @@ function W.card(server, item, x, y, w, h, focus, kind)
         W.progressBar(dx, dy + dh - 5 * u, dw, 5 * u, prog)
     end
 
-    -- request state of a Seerr result
-    if item.seerr and item.status and item.status > 1 and item.status ~= 7 then
-        local label = W.requestStatus(item.status)
+    -- request state of a Seerr result, or a note such as "Not on <server>"
+    if item.badge or (item.seerr and item.status and item.status > 1 and item.status ~= 7) then
+        local label = item.badge or W.requestStatus(item.status)
         local f = gfx.font(16 * u)
         local bw = f:getWidth(label) + 18 * u
         gfx.color(item.status == 4 and theme.accent or theme.surfaceHi, 0.95)
@@ -138,12 +163,34 @@ function W.card(server, item, x, y, w, h, focus, kind)
         gfx.roundRect("line", dx - 2 * u, dy - 2 * u, dw + 4 * u, dh + 4 * u, 8 * u)
         if kind ~= "wide" then
             gfx.text(gfx.fit(api.displayTitle(item), 22 * u, dw + 40 * u), dx, dy + dh + 12 * u, 22 * u, theme.text, focus)
-            gfx.text(gfx.fit(api.subtitle(item), 18 * u, dw + 40 * u), dx, dy + dh + 40 * u, 18 * u, theme.textDim, focus)
+            -- a "For You" pick says why (plex/recommend.lua)
+            -- a "For You" pick says why instead (plex/recommend.lua)
+            gfx.text(gfx.fit(item.reason or api.subtitle(item), 18 * u, dw + 40 * u), dx, dy + dh + 40 * u, 18 * u,
+                item.reason and theme.accent or theme.textDim, focus)
         end
     end
 end
 
+-- The cast symbol (a screen with signal arcs in its bottom-left corner), size wide, centred on cx, cy.
+function W.castIcon(cx, cy, size, u)
+    local lw = math.max(1.5, size * 0.09)
+    love.graphics.setLineWidth(lw)
+    local x0, y0 = cx - size / 2, cy - size * 0.38
+    local sw, sh = size, size * 0.76
+    -- the screen's outline, open at the bottom left where the arcs go
+    love.graphics.line(x0, y0 + sh * 0.35, x0, y0, x0 + sw, y0, x0 + sw, y0 + sh, x0 + sw * 0.45, y0 + sh)
+    local ox, oy = x0, y0 + sh
+    love.graphics.circle("fill", ox + lw * 0.6, oy - lw * 0.6, lw * 0.9)
+    love.graphics.arc("line", "open", ox, oy, sh * 0.32, -math.pi / 2, 0)
+    love.graphics.arc("line", "open", ox, oy, sh * 0.58, -math.pi / 2, 0)
+end
+
 -- Pill button. kind = "primary" (filled white), "secondary" (translucent).
+-- Width W.button would draw `label` at height h (icon: an opts.icon name or nil).
+function W.buttonWidth(label, h, icon)
+    return gfx.font(h * 0.42):getWidth(label) + h * 0.9 + (icon and h * 0.55 or 0)
+end
+
 function W.button(label, x, y, h, focus, opts)
     opts = opts or {}
     local u = gfx.unit()
@@ -183,6 +230,15 @@ function W.button(label, x, y, h, focus, opts)
         love.graphics.setLineWidth(3 * u)
         local ix = tx - iconW * 0.55
         love.graphics.line(ix - h * 0.15, dy + dh / 2, ix - h * 0.03, dy + dh / 2 + h * 0.12, ix + h * 0.17, dy + dh / 2 - h * 0.12)
+    elseif opts.icon == "plus" then
+        gfx.color(tc)
+        love.graphics.setLineWidth(3 * u)
+        local ix, iy, r = tx - iconW * 0.55, dy + dh / 2, h * 0.15
+        love.graphics.line(ix - r, iy, ix + r, iy)
+        love.graphics.line(ix, iy - r, ix, iy + r)
+    elseif opts.icon == "cast" then
+        gfx.color(tc)
+        W.castIcon(tx - iconW * 0.6, dy + dh / 2, h * 0.36, u)
     elseif opts.icon == "restart" then
         gfx.color(tc)
         love.graphics.setLineWidth(2.5 * u)
@@ -243,6 +299,40 @@ end
 W.pointerIn = pointerIn
 
 -- The signed-in user's picture in a circle, or their initial until it loads.
+-- A cast member (a metadata Role: tag, role, thumb): round portrait of width
+-- `w` with the name and character under it. Initials when there's no photo.
+function W.personCard(server, person, x, y, w, focus)
+    local u = gfx.unit()
+    focus = focus or 0
+    local r = w / 2 * (1 + 0.07 * focus)
+    local cx, cy = x + w / 2, y + w / 2
+    love.graphics.setColor(0, 0, 0, 0.35 + 0.25 * focus)
+    love.graphics.circle("fill", cx + 3 * u, cy + 6 * u, r)
+    local img = W.itemImage(server, person.thumb, w, w)
+    if img then
+        gfx.circleImage(img, cx, cy, r)
+    else
+        gfx.color(theme.surfaceHi)
+        love.graphics.circle("fill", cx, cy, r)
+        local initials = ""
+        for word in (person.tag or "?"):gmatch("%S+") do
+            if #initials < 2 then initials = initials .. (word:match("^[%z\1-\127\194-\244][\128-\191]*") or "") end
+        end
+        local size = r * 0.7
+        gfx.textCentered(initials:upper(), cx, cy - gfx.font(size, initials):getHeight() / 2, size, theme.textDim)
+    end
+    if focus > 0.01 then
+        gfx.color(theme.accent, focus)
+        love.graphics.setLineWidth(3 * u)
+        love.graphics.circle("line", cx, cy, r + 2 * u)
+    end
+    local ty = y + w + 12 * u
+    gfx.textCentered(gfx.fit(person.tag or "", 19 * u, w + 16 * u), cx, ty, 19 * u, focus > 0.5 and theme.text or theme.textDim)
+    if person.role and person.role ~= "" then
+        gfx.textCentered(gfx.fit(person.role, 16 * u, w + 16 * u), cx, ty + 26 * u, 16 * u, theme.textDim, 0.75)
+    end
+end
+
 function W.avatar(cx, cy, r, alpha)
     local client = require("plex.client")
     local img = gfx.remote(client.settings.userThumb)
@@ -328,6 +418,26 @@ function W.backButton(x, y, s, focused, onClick)
     love.graphics.line(cx + a * 0.38, cy, cx - a * 0.36, cy)
     love.graphics.line(cx - a * 0.08, cy - a * 0.3, cx - a * 0.38, cy, cx - a * 0.08, cy + a * 0.3)
     require("ui.mouse").region(x, y, s, s, { click = onClick })
+end
+
+-- "⋯" button on a card under the pointer (as on Plex's poster hover): opens the
+-- item's menu. Call after drawing the card and registering its own region.
+-- Posters have it bottom right; wide cards top left, clear of the caption.
+function W.moreButton(x, y, w, h, focus, kind, onClick)
+    if not pointerIn(x, y, w, h) then return end
+    local u = gfx.unit()
+    local s = 1 + 0.07 * (focus or 0)
+    local dw, dh = w * s, h * s
+    local dx, dy = x + (w - dw) / 2, y + (h - dh) / 2
+    local r = 19 * u
+    local cx = kind == "wide" and dx + 12 * u + r or dx + dw - 12 * u - r
+    local cy = kind == "wide" and dy + 12 * u + r or dy + dh - 14 * u - r
+    local lit = pointerIn(cx - r, cy - r, 2 * r, 2 * r)
+    gfx.color(lit and theme.accent or { 0, 0, 0 }, lit and 1 or 0.65)
+    love.graphics.circle("fill", cx, cy, r)
+    gfx.color(theme.text)
+    for i = -1, 1 do love.graphics.circle("fill", cx + i * 7 * u, cy, 2.6 * u) end
+    require("ui.mouse").region(cx - r, cy - r, 2 * r, 2 * r, { click = onClick, context = onClick })
 end
 
 -- Arrow strip at one end of a card row (dir -1 = left, 1 = right), shown while the

@@ -51,6 +51,7 @@ function Servers:open(server)
     end
     self.opened = true
     client.set("serverId", server.id)
+    servers.remember(server)            -- next launch goes straight to Home with it
     print(("[servers] using %s via %s (%s)"):format(server.name, server:baseUrl(), server:connectionLabel()))
     app.reset(require("ui.home").new(server))
 end

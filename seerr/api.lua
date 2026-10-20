@@ -17,8 +17,9 @@ local TMDB_IMAGES = "https://image.tmdb.org/t/p/"
 -- Media status (mediaInfo.status, also per season)
 seerr.UNKNOWN, seerr.PENDING, seerr.PROCESSING = 1, 2, 3
 seerr.PARTIAL, seerr.AVAILABLE, seerr.BLOCKLISTED, seerr.DELETED = 4, 5, 6, 7
--- Request status
-local REQUEST_DECLINED = 3
+-- Request status (5 = completed, Jellyseerr)
+seerr.REQUEST_PENDING, seerr.REQUEST_APPROVED, seerr.REQUEST_DECLINED = 1, 2, 3
+local REQUEST_DECLINED = seerr.REQUEST_DECLINED
 
 local cookie            -- "connect.sid=..." once signed in
 local user              -- the signed-in Seerr user
@@ -162,6 +163,21 @@ function seerr.request(item, seasons, callback)
     local body = { mediaType = item.mediaType, mediaId = item.tmdbId }
     if item.mediaType == "tv" then body.seasons = seasons end
     return call("POST", "/request", nil, body, callback)
+end
+
+-- GET /user/{id}/requests: the signed-in user's latest requests, newest first.
+-- callback(list) or nil, err. Each has id, status (seerr.REQUEST_*) and media.{tmdbId, mediaType, status}.
+function seerr.myRequests(callback)
+    if not user then
+        return login(function(ok, err)
+            if not ok then return callback(nil, err) end
+            seerr.myRequests(callback)
+        end)
+    end
+    return call("GET", "/user/" .. tostring(user.id) .. "/requests", { take = 50, skip = 0 }, nil, function(data, err)
+        if not data then return callback(nil, err) end
+        callback(data.results or {})
+    end)
 end
 
 -- Does the signed-in user's request get approved automatically?

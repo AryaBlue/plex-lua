@@ -154,8 +154,8 @@ function Search:run()
         self.searchedFor = q
         self.plexRows = {}
         for _, h in ipairs(hubs or {}) do
-            self.plexRows[#self.plexRows + 1] = { title = h.title, kind = W.kindFor(h.items[1], h.hub),
-                                                  items = h.items }
+            self.plexRows[#self.plexRows + 1] = { title = h.title, items = h.items,
+                                                  kind = h.type == "genre" and "genre" or W.kindFor(h.items[1], h.hub) }
         end
         self:buildRows()
     end)
@@ -232,18 +232,31 @@ function Search:open(item)
     if not item then return end
     self:remember()
     if item.seerr then return app.push(require("ui.request").new(self.server, item)) end
+    if item.type == "genre" then
+        -- the library it belongs to, showing only that genre
+        local section = { key = item.sectionKey, title = item.sectionTitle }
+        return app.push(require("ui.library").new(self.server, section, { id = item.genre, title = item.title }))
+    end
     app.push(require("ui.detail").new(self.server, item))
 end
 
 function Search:play(item)
     if not item then return end
-    if item.seerr or not api.isPlayable(item) then return self:open(item) end
+    if item.seerr or item.type == "genre" or not api.isPlayable(item) then return self:open(item) end
     self:remember()
     api.metadata(self.server, item.ratingKey, function(full, err)
         if not full then return app.notify(tostring(err), "error") end
         app.push(require("player.scene").new(self.server, full))
     end)
 end
+
+-- Options for a library result (right click, its ⋯ button, or Tab / Y).
+function Search:itemMenu(item, anchor)
+    require("ui.itemmenu").open(self.server, item, { anchor = anchor })
+end
+
+-- Library results get the options menu; Seerr results and genres don't.
+local function hasMenu(item) return item and not item.seerr and item.type ~= "genre" end
 
 function Search:useRecent(i)
     local q = (client.settings.recentSearches or {})[i]
@@ -278,12 +291,13 @@ end
 
 function Search:cardSize(row, m)
     if row.kind == "wide" then return m.wideW, m.wideH end
+    if row.kind == "genre" then return W.GENRE_W * m.u, W.GENRE_H * m.u end
     return m.posterW, m.posterH
 end
 
 function Search:rowHeight(row, m)
     local _, ch = self:cardSize(row, m)
-    return m.titleH + ch + (row.kind == "wide" and 0 or 64 * m.u) + 36 * m.u
+    return m.titleH + ch + (row.kind == "poster" and 64 * m.u or 0) + 36 * m.u
 end
 
 function Search:rowY(i, m)
@@ -353,6 +367,7 @@ function Search:actionResults(a)
     elseif a == "down" then self.row = math.min(#self.rows, self.row + 1)
     elseif a == "accept" then self:open(r.items[r.col])
     elseif a == "playpause" then self:play(r.items[r.col])
+    elseif a == "menu" then self:itemMenu(r.items[r.col], r.rects and r.rects[r.col])
     end
 end
 
@@ -477,24 +492,33 @@ function Search:drawRows(m)
                 row.col = math.max(1, math.min(#row.items, row.col + (dx > 0 and 1 or -1)))
                 return true
             end })
-            local focusedCol = W.topCard(row.anim, 1, #row.items)
+            local focusedCol = row.kind ~= "genre" and W.topCard(row.anim, 1, #row.items) or nil
+            row.rects = {}
             for c, item in ipairs(row.items) do
                 local cx = m.rx + (c - 1) * (cw + m.cardGap) - row.scrollAnim
                 if cx > m.w then break end
                 if cx + cw > m.rx - 40 * u then
                     if c ~= focusedCol then W.card(self.server, item, cx, cy, cw, ch, row.anim[c] or 0, row.kind) end
+                    local rect = { x = cx, y = cy, w = cw, h = ch }
+                    row.rects[c] = rect
                     mouse.region(cx, cy, cw, ch, {
                         hover = function()
                             self.mouseScroll, self.pointerFocus = true, true
                             self.zone, self.row, row.col = "results", i, c
                         end,
                         click = function() self:open(item) end,
+                        context = hasMenu(item) and function() self:itemMenu(item, rect) end or nil,
                     })
                 end
             end
             if focusedCol then
                 local cx = m.rx + (focusedCol - 1) * (cw + m.cardGap) - row.scrollAnim
-                W.card(self.server, row.items[focusedCol], cx, cy, cw, ch, row.anim[focusedCol], row.kind)
+                local item = row.items[focusedCol]
+                W.card(self.server, item, cx, cy, cw, ch, row.anim[focusedCol], row.kind)
+                if hasMenu(item) then
+                    W.moreButton(cx, cy, cw, ch, row.anim[focusedCol], row.kind,
+                        function() self:itemMenu(item, row.rects[focusedCol]) end)
+                end
             end
             W.rowArrows(m.rx - 30 * u, cy, m.w - m.rx + 30 * u, ch, row.scrollAnim / (cw + m.cardGap), #row.items,
                 row.visible or 1, function(dir) self:pageRow(row, dir) end)

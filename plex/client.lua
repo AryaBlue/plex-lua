@@ -19,6 +19,12 @@ client.settings = {
     autoPlay = true,         -- play the next episode after a countdown
     autoPlayDelay = 10,      -- countdown seconds (Plex's own is 10)
     theme = "reel",          -- theme.presets id
+    qualityHome = 0,         -- kbps limit on this network (0 = Original); playback.QUALITIES
+    qualityAway = 0,         -- the same over the internet / relay
+    castDialHosts = {},      -- addresses asked directly for DIAL devices (Fire TV sticks); cast/init.lua
+    castDialScan = false,    -- also look for DIAL devices across the whole network
+    castBlock = {},          -- device names or addresses never offered or contacted
+    castAdb = true,          -- control Plex on Fire TV over ADB (cast/adb_worker.lua)
 }
 
 local function random_id()

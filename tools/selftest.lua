@@ -68,6 +68,18 @@ local function offline()
     check("overlapping cues", (subs.at(cues, 2.2)), "Hello there\nOverlap")
     check("cue after jump back", (subs.at(cues, 1.6, 3)), "Hello there")
     check("cue at 63", (subs.at(cues, 63, 1)), "Two\nlines")
+
+    local ass = subs.parse("[Script Info]\r\nTitle: x\r\n\r\n[Events]\r\n" ..
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\r\n" ..
+        "Dialogue: 0,0:00:05.10,0:00:07.00,Default,,0,0,0,,{\\i1}Wait,{\\i0} what?\\NNo!\r\n" ..
+        "Comment: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,not shown\r\n" ..
+        "Dialogue: 0,0:00:01.00,0:00:02.50,Sign,,0,0,0,,Asta\r\n")
+    check("ass cue count", #ass, 2)
+    check("ass sorted + centiseconds", ass[2].start, 5.1)
+    check("ass text keeps commas", ass[2].text, "Wait, what?\nNo!")
+    local vtt = subs.parse("WEBVTT\n\n00:01.000 --> 00:02.500\nShort form\n\n1\n00:00:03.000 --> 00:00:04.000 line:90%\nLong form\n")
+    check("vtt without hours", vtt[1] and vtt[1].stop, 2.5)
+    check("vtt cue count", #vtt, 2)
 end
 
 local live = {}

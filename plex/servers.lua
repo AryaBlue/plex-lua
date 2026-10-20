@@ -73,6 +73,7 @@ Server.__index = Server
 
 local function new_server(res)
     local self = setmetatable({
+        resource = res,         -- kept so servers.remember can cache it
         id = res.clientIdentifier,
         name = res.name or "Plex Media Server",
         owned = res.owned == true,
@@ -190,6 +191,99 @@ function servers.fetch(callback)
         end)
         callback(out)
     end)
+end
+
+---------------------------------------------------------------------------
+-- Quick start: the server last used is cached in settings.lastServer (its
+-- resource entry plus the address that worked), so the next launch can go
+-- straight to Home and check just that address instead of fetching the list
+-- and testing every connection first.
+
+local CACHED_FIELDS = { "clientIdentifier", "name", "owned", "sourceTitle", "accessToken", "presence",
+                        "productVersion", "platform", "httpsRequired" }
+
+function servers.remember(server)
+    local res = server.resource
+    if not res or not server.active then return end
+    local cache = { lastUri = server.active.uri, connections = {} }
+    for _, k in ipairs(CACHED_FIELDS) do
+        if type(res[k]) ~= "table" then cache[k] = res[k] end
+    end
+    for _, c in ipairs(res.connections or {}) do
+        if type(c) == "table" and type(c.uri) == "string" then
+            cache.connections[#cache.connections + 1] = { uri = c.uri, protocol = c.protocol, address = c.address,
+                port = c.port, relay = c.relay, ["local"] = c["local"], IPv6 = c.IPv6 }
+        end
+    end
+    client.set("lastServer", cache)
+end
+
+-- The cached last server, not yet connected (nil if there's none for serverId).
+function servers.cached()
+    local cache = client.settings.lastServer
+    if type(cache) ~= "table" or not cache.clientIdentifier or cache.clientIdentifier ~= client.settings.serverId then
+        return nil
+    end
+    local server = new_server(cache)
+    server.lastUri = cache.lastUri
+    return server
+end
+
+-- Connect a cached server: try the address that worked last time, and at the
+-- same time fetch the account's servers again (addresses and tokens change).
+-- If the old address hasn't answered by the time the list arrives, test every
+-- connection from the fresh list too; whichever answers first is used.
+-- onChange(server) as for Server:connect.
+function Server:quickConnect(onChange)
+    local last
+    for _, c in ipairs(self.connections) do
+        if c.uri == self.lastUri then last = c end
+    end
+    local quickFailed = last == nil
+    local fresh                              -- this server in the new list; false = not there
+    local function fallback()
+        if self.state == "online" or fresh == nil then return end
+        if fresh then
+            self.connections = fresh.connections
+            return self:connect(onChange)
+        end
+        if quickFailed then
+            self.state = "offline"           -- gone from the account, or plex.tv unreachable too
+            if onChange then onChange(self) end
+        end
+    end
+
+    servers.fetch(function(list)
+        fresh = false
+        for _, s in ipairs(list or {}) do
+            if s.id == self.id then fresh = s end
+        end
+        if fresh then
+            self.resource, self.accessToken, self.name = fresh.resource, fresh.accessToken, fresh.name
+            if self.state == "online" then servers.remember(self) end   -- keep the cache current
+        end
+        fallback()
+    end)
+
+    if not last then return end
+    self.state = "testing"
+    last.state = "testing"
+    local started = love.timer.getTime()
+    http.json({ url = last.uri .. "/identity", headers = client.headers(self.accessToken), timeout = 6 },
+        function(data)
+            local mc = data and (data.MediaContainer or data)
+            if mc and mc.machineIdentifier == self.id then
+                last.state, last.latency = "ok", love.timer.getTime() - started
+                if self.state ~= "online" then
+                    self.active, self.state = last, "online"
+                    if onChange then onChange(self) end
+                end
+            else
+                last.state = "failed"
+                quickFailed = true
+                fallback()
+            end
+        end)
 end
 
 servers._internal = { is_private = is_private, is_loopback = is_loopback, plex_direct_ip = plex_direct_ip }

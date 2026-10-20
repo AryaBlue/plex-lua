@@ -1,5 +1,7 @@
 -- Home: top nav (Home + libraries), a rotating hero banner, and horizontal
--- rows built from the server's /hubs (plus Continue Watching).
+-- rows built from the server's /hubs (plus Continue Watching), your Watchlist
+-- (plex/watchlist.lua) and a "Recommended <library>" row per film and TV
+-- library (plex/recommend.lua, the library's For You sort).
 --
 -- Focus rows: 0 = nav bar, 1 = hero buttons, 2.. = hub rows.
 
@@ -16,6 +18,7 @@ Home.__index = Home
 
 local HERO_ROTATE = 12
 local HERO_MAX = 6
+local watchlist = require("plex.watchlist")
 local OPENABLE = { movie = true, show = true, season = true, episode = true, clip = true }
 
 function Home.new(server)
@@ -37,12 +40,34 @@ function Home.new(server)
 end
 
 function Home:enter()
+    -- straight from launch the server may still be connecting (servers.cached + quickConnect)
+    if self.server.state ~= "online" then
+        self.connecting, self.loading = true, true
+        return
+    end
     self:load()
 end
 
 function Home:resume()
     -- back from player/detail: refresh progress and Continue Watching
-    self:load(true)
+    if not self.connecting then self:load(true) end
+end
+
+-- While connecting: load once the server answers; if it can't be reached,
+-- fall back to the server list.
+function Home:checkConnection()
+    local state = self.server.state
+    if state == "online" then
+        self.connecting = false
+        require("plex.servers").remember(self.server)
+        print(("[servers] using %s via %s (%s)"):format(self.server.name, self.server:baseUrl(),
+            self.server:connectionLabel()))
+        self:load()
+    elseif state == "offline" or state == "unauthorized" then
+        self.connecting = false
+        app.notify(("Couldn't reach %s"):format(self.server.name), "error")
+        app.reset(require("ui.servers").new(false))
+    end
 end
 
 local function isContinueHub(hub)
@@ -67,9 +92,30 @@ function Home:load(quiet)
     end)
     api.continueWatching(self.server, function(items) cont = items; done() end)
     api.sections(self.server, function(s) sections = s; done() end)
+    -- the Watchlist row comes from plex.tv, so it joins the page when it's ready
+    -- (a full load fetches the list again; a quiet one reuses it)
+    local function gotWatchlist(items)
+        if not items then return end
+        self.watchlistItems = items
+        local b = self.lastBuild
+        if b then self:build(b[1], b[2], b[3]) end
+    end
+    if quiet and watchlist.loaded() then
+        watchlist.items(self.server, gotWatchlist)
+    else
+        watchlist.load(function(list) if list then watchlist.items(self.server, gotWatchlist) end end)
+    end
+    -- "Recommended <library>" rows (plex/recommend.lua) also join when ready
+    require("plex.recommend").home(self.server, 30, function(rows)
+        if not rows then return end
+        self.recommendRows = rows
+        local b = self.lastBuild
+        if b then self:build(b[1], b[2], b[3]) end
+    end)
 end
 
 function Home:build(hubs, cont, sections)
+    self.lastBuild = { hubs, cont, sections }
     -- Keep the user's place when refreshing.
     local prevRow = self.rows[self.focusRow - 1]
     local prevTitle, prevCol = prevRow and prevRow.title, prevRow and prevRow.col
@@ -80,7 +126,7 @@ function Home:build(hubs, cont, sections)
         if isContinueHub(hub) then haveContinue = true end
     end
     if not haveContinue and #cont > 0 then
-        rows[#rows + 1] = { title = "Continue Watching", kind = "wide", items = cont }
+        rows[#rows + 1] = { title = "Continue Watching", kind = "wide", items = cont, continue = true }
     end
     -- On Deck mostly repeats Continue Watching; keep only what's not already there.
     local inContinue = {}
@@ -96,19 +142,39 @@ function Home:build(hubs, cont, sections)
             if OPENABLE[it.type] and not (isOnDeck and inContinue[it.ratingKey]) then items[#items + 1] = it end
         end
         if #items > 0 then
-            rows[#rows + 1] = { title = hub.title or "", kind = W.kindFor(items[1], hub), items = items, hub = hub }
+            rows[#rows + 1] = { title = hub.title or "", kind = W.kindFor(items[1], hub), items = items, hub = hub,
+                                continue = isContinueHub(hub) ~= nil }
+        end
+    end
+    -- Watchlist (plex.tv) after the in-progress rows, as on Plex's home
+    if self.watchlistItems and #self.watchlistItems > 0 then
+        local at = 1
+        for i, r in ipairs(rows) do if r.continue then at = i + 1 end end
+        table.insert(rows, at, { title = "Watchlist", kind = "poster", items = self.watchlistItems, watchlist = true })
+    end
+    -- your For You picks after that, one row per library
+    if self.recommendRows then
+        local at = 1
+        for i, r in ipairs(rows) do if r.continue or r.watchlist then at = i + 1 end end
+        for _, rec in ipairs(self.recommendRows) do
+            table.insert(rows, at, { title = rec.title, kind = "poster", items = rec.items, recommended = true })
+            at = at + 1
         end
     end
     for _, r in ipairs(rows) do
         r.col, r.scroll, r.anim = 1, 0, {}
         if r.title == prevTitle then r.col = math.min(prevCol or 1, #r.items) end
     end
+    -- rows that join later (Watchlist, Recommended) mustn't move focus off the row you're on
+    if prevTitle and self.focusRow >= 2 then
+        for i, r in ipairs(rows) do if r.title == prevTitle then self.focusRow = i + 1 end end
+    end
     self.rows = rows
 
     -- Hero: recent items with backdrop art, not the in-progress row.
     local hero, seen = {}, {}
     for _, r in ipairs(rows) do
-        if r.kind == "poster" then
+        if r.kind == "poster" and not r.watchlist and not r.recommended then
             for _, it in ipairs(r.items) do
                 local key = it.ratingKey
                 if it.art and not seen[key] and #hero < HERO_MAX and (it.type == "movie" or it.type == "show") then
@@ -180,6 +246,7 @@ function Home:focusedItem()
 end
 
 function Home:update(dt)
+    if self.connecting then self:checkConnection() end
     local m = self:metrics()
 
     -- hero rotation (paused while the hero buttons have focus)
@@ -237,11 +304,19 @@ end
 
 function Home:open(item)
     if not item then return end
+    if item.notOnServer then
+        -- a watchlist title the server doesn't have: its Seerr request page
+        if require("seerr.api").enabled() and item.tmdbId then
+            return app.push(require("ui.request").new(self.server, require("ui.itemmenu").requestItem(item)))
+        end
+        return app.notify(item.title .. " isn't on " .. self.server.name)
+    end
     app.push(require("ui.detail").new(self.server, item))
 end
 
 function Home:play(item)
     if not item then return end
+    if item.notOnServer then return self:open(item) end
     if api.isPlayable(item) then
         api.metadata(self.server, item.ratingKey, function(full, err)
             if not full then return app.notify(tostring(err), "error") end
@@ -306,6 +381,8 @@ function Home:action(a)
             if self.heroButton == 1 then self:playHero(hero) else self:open(hero) end
         elseif a == "playpause" then
             self:playHero(hero)
+        elseif a == "menu" then
+            self:itemMenu(hero)
         elseif a == "back" then
             self.focusRow = 0
         end
@@ -316,9 +393,19 @@ function Home:action(a)
         elseif a == "right" then row.col = math.min(#row.items, row.col + 1)
         elseif a == "accept" then self:open(row.items[row.col])
         elseif a == "playpause" then self:play(row.items[row.col])
+        elseif a == "menu" then self:itemMenu(row.items[row.col], row, row.rects and row.rects[row.col])
         elseif a == "back" then self.focusRow = 1
         end
     end
+end
+
+-- The options menu for a card (right click, its ⋯ button, or Tab / Y).
+-- Changes reload the rows quietly (Continue Watching, watched ticks).
+function Home:itemMenu(item, row, anchor)
+    require("ui.itemmenu").open(self.server, item, {
+        anchor = anchor, continueWatching = row and row.continue,
+        onChange = function() self:load(true) end,
+    })
 end
 
 -- Play from the hero: movies play directly, shows open their page.
@@ -434,19 +521,25 @@ function Home:draw()
             end })
             -- draw unfocused cards first so the focused one overlaps its neighbours
             local focusedCol = W.topCard(row.anim, first, #row.items)
+            row.rects = {}
             for c = first, #row.items do
                 local cx = m.pad + (c - 1) * (cw + m.cardGap) - (row.scrollAnim or 0)
                 if cx > m.w then break end
                 if c ~= focusedCol then W.card(self.server, row.items[c], cx, cy, cw, ch, row.anim[c] or 0, row.kind) end
                 local item = row.items[c]
+                local rect = { x = cx, y = cy, w = cw, h = ch }
+                row.rects[c] = rect
                 mouse.region(cx, cy, cw, ch, {
                     hover = function() self.mouseScroll = true; self.focusRow, row.col, self.pointerFocus = i + 1, c, true end,
                     click = function() self:open(item) end,
+                    context = function() self:itemMenu(item, row, rect) end,
                 })
             end
             if focusedCol then
                 local cx = m.pad + (focusedCol - 1) * (cw + m.cardGap) - (row.scrollAnim or 0)
                 W.card(self.server, row.items[focusedCol], cx, cy, cw, ch, row.anim[focusedCol], row.kind)
+                W.moreButton(cx, cy, cw, ch, row.anim[focusedCol], row.kind,
+                    function() self:itemMenu(row.items[focusedCol], row, row.rects[focusedCol]) end)
             end
             -- edge fade hints that a row continues
             if (row.scrollAnim or 0) > 1 then gfx.hgradient(0, cy - 10 * u, m.pad, ch + 20 * u, theme.bg, 0.9, 0) end
@@ -457,6 +550,9 @@ function Home:draw()
 
     if self.loading and #self.rows == 0 then
         gfx.spinner(m.w / 2, m.h * 0.55, 30 * u)
+        if self.connecting then
+            gfx.textCentered("Connecting to " .. self.server.name .. "…", m.w / 2, m.h * 0.55 + 50 * u, 22 * u, theme.textDim)
+        end
     elseif self.error and #self.rows == 0 then
         gfx.textCentered("Couldn't load " .. self.server.name .. ": " .. tostring(self.error), m.w / 2, m.h / 2, 26 * u, theme.danger)
     end
