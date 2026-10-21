@@ -78,8 +78,8 @@ While the app is open it checks your requests every minute and pops up a notific
 poster) when one is **approved** or **declined**, or when it's **now on Plex**. Changes that happen while the app
 is closed are announced the next time it starts.
 
-In the player, Left/Right seek 10 s. Seeks wait 0.45 s for further presses before running.
-Down moves from the seek bar to the control row: play/pause, back 10 s, forward 10 s, volume, and fullscreen.
+In the player, Left/Right (and J/L) seek 30 s. Seeks wait 0.45 s for further presses before running.
+Down moves from the seek bar to the control row: play/pause, back 30 s, forward 30 s, volume, and fullscreen.
 Up goes to the back button. With volume selected, Up and Down change it. `+`/`-` change the volume and `F` toggles fullscreen at any time.
 The volume is remembered between sessions.
 

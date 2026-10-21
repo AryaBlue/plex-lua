@@ -245,7 +245,7 @@ add("fire tv pause", function()
     local ev = findLog(function(e) return e.kind == "adb-key-event" end)
     check("pause key", ev and ev.codes[1], 127)
     T.pos = cast.position()
-    player():runControl("fwd10")
+    player():runControl("skipfwd")
     T.at = love.timer.getTime()
     return true
 end)

@@ -43,14 +43,14 @@ local Player = {}
 Player.__index = Player
 
 local OVERLAY_TIME = 3.5
-local SEEK_STEP = 10
+local SEEK_STEP = 30             -- arrows and the skip buttons
 local SEEK_SETTLE = 0.45        -- wait this long after the last seek press before seeking
 local TIMELINE_INTERVAL = 10
 local DOUBLE_CLICK = 0.35       -- seconds between clicks that count as a double click
 local VOLUME_STEP = 0.1
 
 -- The row under the seek bar, left to right (fullscreen sits at the far right).
-local CONTROLS = { "playpause", "back10", "fwd10", "volume", "cast", "subtitles", "fullscreen" }
+local CONTROLS = { "playpause", "skipback", "skipfwd", "volume", "cast", "subtitles", "fullscreen" }
 
 local sessions = 0
 local function nextSession()
@@ -767,8 +767,8 @@ function Player:runCastControl(name)
     if not cast.canControl() then return end
     if name == "playpause" then
         self:setPlaying(not self:isPlaying())
-    elseif name == "back10" or name == "fwd10" then
-        local dir = name == "fwd10" and 1 or -1
+    elseif name == "skipback" or name == "skipfwd" then
+        local dir = name == "skipfwd" and 1 or -1
         -- Fire TV: one press of Plex's own skip; Chromecast: a seek (presses add up)
         if s.device.kind == "dial" then cast.skip(dir * SEEK_STEP)
         else self:requestSeek(self:mediaTime() + dir * SEEK_STEP) end
@@ -854,9 +854,9 @@ function Player:runControl(name)
     if name == "playpause" then
         self:setPlaying(self.state ~= "playing")
         if self.state == "playing" then self.overlay = OVERLAY_TIME end
-    elseif name == "back10" then
+    elseif name == "skipback" then
         self:requestSeek(self:mediaTime() - SEEK_STEP)
-    elseif name == "fwd10" then
+    elseif name == "skipfwd" then
         self:requestSeek(self:mediaTime() + SEEK_STEP)
     elseif name == "volume" then
         self:setVolume(self.volume, not self.muted)
@@ -903,8 +903,8 @@ function Player:action(a)
 
     -- dedicated buttons work regardless of focus
     if a == "playpause" then return self:runControl("playpause") end
-    if a == "seekback" then return self:requestSeek(self:mediaTime() - SEEK_STEP * 3) end
-    if a == "seekfwd" then return self:requestSeek(self:mediaTime() + SEEK_STEP * 3) end
+    if a == "seekback" then return self:requestSeek(self:mediaTime() - SEEK_STEP) end
+    if a == "seekfwd" then return self:requestSeek(self:mediaTime() + SEEK_STEP) end
     if hidden and a == "accept" then return end          -- first press just shows the controls
 
     if self.focus == "back" then
@@ -951,17 +951,21 @@ local function drawIcon(name, cx, cy, s, p)
     elseif name == "pause" then
         love.graphics.rectangle("fill", cx - s * 0.32, cy - s * 0.38, s * 0.22, s * 0.76)
         love.graphics.rectangle("fill", cx + s * 0.1, cy - s * 0.38, s * 0.22, s * 0.76)
-    elseif name == "back10" or name == "fwd10" then
-        local dir = name == "fwd10" and 1 or -1
+    elseif name == "skipback" or name == "skipfwd" then
+        local dir = name == "skipfwd" and 1 or -1
         local r = s * 0.42
-        -- open circle with an arrowhead at the top, "10" inside
-        if dir > 0 then love.graphics.arc("line", "open", cx, cy, r, -math.pi * 0.35, math.pi * 1.45)
-        else love.graphics.arc("line", "open", cx, cy, r, -math.pi * 0.45, math.pi * 1.35) end
-        local ax = cx + dir * r * 0.15
-        love.graphics.polygon("fill", ax, cy - r - s * 0.13, ax, cy - r + s * 0.13, ax + dir * s * 0.2, cy - r)
+        -- a circle open at the top, the skip length inside; the arrowhead continues the
+        -- stroke across the gap: clockwise (pointing right) forward, anticlockwise back
+        love.graphics.arc("line", "open", cx, cy, r, -math.pi / 3, math.pi * 4 / 3)
+        local ex, ey = cx - dir * r * 0.5, cy - r * 0.866       -- the stroke's end the head sits on
+        local tx, ty = dir * 0.866, -0.5                         -- direction of travel there
+        local h, wd = s * 0.2, s * 0.13
+        love.graphics.polygon("fill", ex + tx * h, ey + ty * h,
+            ex - ty * wd, ey + tx * wd, ex + ty * wd, ey - tx * wd)
         local f = gfx.font(s * 0.36)
         love.graphics.setFont(f)
-        love.graphics.print("10", math.floor(cx - f:getWidth("10") / 2), math.floor(cy - f:getHeight() / 2))
+        local n = tostring(SEEK_STEP)
+        love.graphics.print(n, math.floor(cx - f:getWidth(n) / 2), math.floor(cy - f:getHeight() / 2))
     elseif name == "volume" then
         local x0 = cx - s * 0.38
         love.graphics.polygon("fill", x0, cy - s * 0.14, x0 + s * 0.16, cy - s * 0.14, x0 + s * 0.38, cy - s * 0.36,
@@ -1320,7 +1324,7 @@ function Player:drawControls(w, h, u, alpha, starved)
     end
     gfx.text(remain, w - pad - gfx.width(remain, 24 * u), barY - 14 * u, 24 * u, theme.text, alpha)
 
-    -- control row: play/pause, back 10, forward 10, volume (+ slider) ... fullscreen
+    -- control row: play/pause, back 30, forward 30, volume (+ slider) ... fullscreen
     local cs = 64 * u                      -- button size
     local rowY = h - 112 * u
     local x = pad - 10 * u
@@ -1348,8 +1352,8 @@ function Player:drawControls(w, h, u, alpha, starved)
         return focused
     end
     control("playpause", self:isPlaying() and "pause" or "play", x); x = x + cs + 24 * u
-    control("back10", "back10", x); x = x + cs + 24 * u
-    control("fwd10", "fwd10", x); x = x + cs + 24 * u
+    control("skipback", "skipback", x); x = x + cs + 24 * u
+    control("skipfwd", "skipfwd", x); x = x + cs + 24 * u
     local volFocused = control("volume", "volume", x); x = x + cs + 12 * u
 
     -- volume slider beside the speaker (not for a TV that doesn't say its volume)
